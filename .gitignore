@@ -1,0 +1,24 @@
+# Build output
+**/bin/
+**/obj/
+
+# IDE and user-local state
+.vs/
+.idea/
+*.user
+*.suo
+*.slnLaunch.user
+
+# Local launch profiles
+**/Properties/launchSettings.json
+
+# Test/build artifacts
+TestResults/
+artifacts/
+
+# Local environment and configuration
+.env
+.env.*
+!.env.example
+appsettings.Local.json
+appsettings.*.Local.json
