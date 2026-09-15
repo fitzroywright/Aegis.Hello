@@ -3,9 +3,9 @@
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <CommonRoot Condition="'$(CommonRoot)' == ''">..\Common.Registration</CommonRoot>
+    <CommonRoot Condition="'$(CommonRoot)' == ''">..\Common</CommonRoot>
   </PropertyGroup>
   <ItemGroup>
-    <ProjectReference Include="$(CommonRoot)\Common.Registration.csproj" />
+    <ProjectReference Include="$(CommonRoot)\Common.Registration\Common.Registration.csproj" />
   </ItemGroup>
 </Project>
