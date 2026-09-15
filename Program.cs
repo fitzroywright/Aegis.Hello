@@ -1,4 +1,6 @@
+using System.Net;
 using System.Net.Http.Json;
+using System.Reflection;
 using System.Text.Json.Nodes;
 using Common.Registration;
 
@@ -17,15 +19,11 @@ builder.Services.AddHttpClient("diagnostics");
 
 var app = builder.Build();
 
-var identity = ComponentIdentity.Detect(
-    "Aegis.Hello",
-    "Web",
-    new[]
-    {
-        new ConfigurationRequirement("Hello:RequiredMessage", true, "Required value used to prove configuration state changes."),
-        new ConfigurationRequirement("Hello:OptionalLabel", false, "Optional display label.")
-    },
-    app.Environment.EnvironmentName);
+const string applicationId = "Aegis.Hello";
+const string component = "Web";
+string version = Assembly.GetEntryAssembly()?.GetName().Version?.ToString() ?? "unknown";
+string environmentName = app.Environment.EnvironmentName;
+string hostName = Dns.GetHostName();
 
 var stateGate = new object();
 RegistrationResult? lastRegistration = null;
@@ -37,15 +35,15 @@ JsonObject BuildContract()
 
     return new JsonObject
     {
-        ["applicationId"] = identity.Application,
+        ["applicationId"] = applicationId,
         ["displayName"] = "Aegis Hello",
-        ["version"] = identity.Version,
+        ["version"] = version,
         ["description"] = "Permanent registration and diagnostics contract test application.",
         ["runtimeEnvironment"] = new JsonObject
         {
             ["machineName"] = Environment.MachineName,
-            ["hostName"] = identity.Host,
-            ["hostingEnvironment"] = identity.Environment,
+            ["hostName"] = hostName,
+            ["hostingEnvironment"] = environmentName,
             ["operatingSystem"] = Environment.OSVersion.ToString(),
             ["processArchitecture"] = System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture.ToString(),
             ["frameworkDescription"] = System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription,
@@ -82,10 +80,20 @@ JsonObject BuildContract()
 async Task<RegistrationResult> TryRegisterAsync(CancellationToken ct)
 {
     if (string.IsNullOrWhiteSpace(registrationKey))
-        return RegistrationResult.Failure("Configuration registration key is not configured.");
+    {
+        var failure = RegistrationResult.Failure("Configuration registration key is not configured.");
+        lock (stateGate)
+            lastRegistration = failure;
+        return failure;
+    }
 
     if (!Uri.TryCreate(configurationUrl.TrimEnd('/') + "/", UriKind.Absolute, out Uri? baseUri))
-        return RegistrationResult.Failure("Configuration URL is invalid.");
+    {
+        var failure = RegistrationResult.Failure("Configuration URL is invalid.");
+        lock (stateGate)
+            lastRegistration = failure;
+        return failure;
+    }
 
     var registrar = new ConfigurationRegistrar(
         app.Services.GetRequiredService<IHttpClientFactory>().CreateClient("configuration"),
@@ -105,11 +113,11 @@ app.MapGet("/", () =>
 
     return Results.Ok(new
     {
-        application = identity.Application,
-        component = identity.Component,
-        version = identity.Version,
-        environment = identity.Environment,
-        host = identity.Host,
+        application = applicationId,
+        component,
+        version,
+        environment = environmentName,
+        host = hostName,
         requiredMessageConfigured = !string.IsNullOrWhiteSpace(builder.Configuration["Hello:RequiredMessage"]),
         registration
     });
@@ -146,22 +154,25 @@ app.MapPost("/diagnostics/{level}", async (string level, IHttpClientFactory clie
     if (normalized is not ("info" or "warning" or "error"))
         return Results.BadRequest(new { error = "Level must be info, warning, or error." });
 
+    if (!Uri.TryCreate(diagnosticsUrl.TrimEnd('/') + "/", UriKind.Absolute, out Uri? diagnosticsBaseUri))
+        return Results.Problem("Aegis Diagnostics URL is invalid; no diagnostic event was sent.", statusCode: StatusCodes.Status503ServiceUnavailable);
+
     var payload = new
     {
-        application = identity.Application,
-        component = identity.Component,
+        application = applicationId,
+        component,
         level = normalized,
         message = $"Aegis.Hello real {normalized} contract-test event.",
         occurredAtUtc = DateTimeOffset.UtcNow,
-        host = identity.Host,
-        environment = identity.Environment,
-        version = identity.Version
+        host = hostName,
+        environment = environmentName,
+        version
     };
 
     try
     {
         var client = clients.CreateClient("diagnostics");
-        using var response = await client.PostAsJsonAsync(new Uri(new Uri(diagnosticsUrl.TrimEnd('/') + "/"), "api/events"), payload, ct);
+        using var response = await client.PostAsJsonAsync(new Uri(diagnosticsBaseUri, "api/events"), payload, ct);
         if (!response.IsSuccessStatusCode)
             return Results.Problem($"Diagnostics rejected the event with HTTP {(int)response.StatusCode}.", statusCode: StatusCodes.Status503ServiceUnavailable);
         return Results.Ok(new { sent = true, level = normalized });
