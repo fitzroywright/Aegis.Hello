@@ -32,6 +32,8 @@ JsonObject BuildContract()
 {
     bool requiredConfigured = !string.IsNullOrWhiteSpace(builder.Configuration["Hello:RequiredMessage"]);
     bool optionalConfigured = !string.IsNullOrWhiteSpace(builder.Configuration["Hello:OptionalLabel"]);
+    string? publicUrl = builder.Configuration["Aegis:PublicUrl"];
+    bool publicUrlConfigured = !string.IsNullOrWhiteSpace(publicUrl);
 
     return new JsonObject
     {
@@ -49,8 +51,30 @@ JsonObject BuildContract()
             ["frameworkDescription"] = System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription,
             ["processorCount"] = Environment.ProcessorCount
         },
+        ["diagnostics"] = new JsonObject
+        {
+            ["baseUrlConfigurationKey"] = "Aegis:PublicUrl",
+            ["healthPath"] = "/",
+            ["supportsRemoteDiagnostics"] = false,
+            ["supportsOperationalTelemetry"] = false,
+            ["authenticationScheme"] = "None",
+            ["supportedLevels"] = new JsonArray(1, 2, 3, 4, 5)
+        },
         ["requirements"] = new JsonArray
         {
+            new JsonObject
+            {
+                ["id"] = "public-url",
+                ["displayName"] = "Public URL",
+                ["kind"] = "Configuration",
+                ["required"] = true,
+                ["purpose"] = "Provides the network-reachable Hello endpoint that Diagnostics can discover and probe.",
+                ["configurationKey"] = "Aegis:PublicUrl",
+                ["isConfigured"] = publicUrlConfigured,
+                ["effectiveValueAvailable"] = publicUrlConfigured,
+                ["configurationState"] = publicUrlConfigured ? "Configured" : "Missing",
+                ["safeDisplayValue"] = publicUrlConfigured ? publicUrl : null
+            },
             new JsonObject
             {
                 ["id"] = "required-message",
