@@ -1,0 +1,32 @@
+name: Aegis Hello CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Aegis.Hello
+        uses: actions/checkout@v4
+
+      - name: Checkout Common.Registration
+        uses: actions/checkout@v4
+        with:
+          repository: fitzroywright/Common.Registration
+          path: Common.Registration
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Restore
+        run: dotnet restore Aegis.Hello.slnx -p:CommonRoot="${{ github.workspace }}/Common.Registration"
+
+      - name: Build
+        run: dotnet build Aegis.Hello.slnx --no-restore --configuration Release -p:CommonRoot="${{ github.workspace }}/Common.Registration"
