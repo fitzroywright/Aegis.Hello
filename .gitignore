@@ -11,6 +11,7 @@
 
 # Local launch profiles
 **/Properties/launchSettings.json
+!Properties/launchSettings.json
 
 # Test/build artifacts
 TestResults/
