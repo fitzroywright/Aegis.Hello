@@ -148,42 +148,50 @@ app.MapGet("/config-state", () =>
 app.MapPost("/diagnostics/{level}", async (string level, IHttpClientFactory clients, CancellationToken ct) =>
 {
     if (string.IsNullOrWhiteSpace(diagnosticsUrl))
-        return Results.Problem("Aegis Diagnostics URL is not configured; no diagnostic event was sent.", statusCode: StatusCodes.Status503ServiceUnavailable);
+        return Results.Problem("Aegis Diagnostics URL is not configured; Diagnostics availability was not checked.", statusCode: StatusCodes.Status503ServiceUnavailable);
 
     var normalized = level.ToLowerInvariant();
     if (normalized is not ("info" or "warning" or "error"))
         return Results.BadRequest(new { error = "Level must be info, warning, or error." });
 
     if (!Uri.TryCreate(diagnosticsUrl.TrimEnd('/') + "/", UriKind.Absolute, out Uri? diagnosticsBaseUri))
-        return Results.Problem("Aegis Diagnostics URL is invalid; no diagnostic event was sent.", statusCode: StatusCodes.Status503ServiceUnavailable);
-
-    var payload = new
-    {
-        application = applicationId,
-        component,
-        level = normalized,
-        message = $"Aegis.Hello real {normalized} contract-test event.",
-        occurredAtUtc = DateTimeOffset.UtcNow,
-        host = hostName,
-        environment = environmentName,
-        version
-    };
+        return Results.Problem("Aegis Diagnostics URL is invalid; Diagnostics availability was not checked.", statusCode: StatusCodes.Status503ServiceUnavailable);
 
     try
     {
         var client = clients.CreateClient("diagnostics");
-        using var response = await client.PostAsJsonAsync(new Uri(diagnosticsBaseUri, "api/events"), payload, ct);
+        using var response = await client.GetAsync(new Uri(diagnosticsBaseUri, "health"), ct);
+        string responseBody = await response.Content.ReadAsStringAsync(ct);
+
         if (!response.IsSuccessStatusCode)
-            return Results.Problem($"Diagnostics rejected the event with HTTP {(int)response.StatusCode}.", statusCode: StatusCodes.Status503ServiceUnavailable);
-        return Results.Ok(new { sent = true, level = normalized });
+            return Results.Problem($"Diagnostics health endpoint returned HTTP {(int)response.StatusCode}; Diagnostics availability was not proven.", statusCode: StatusCodes.Status503ServiceUnavailable);
+
+        JsonNode? health = null;
+        try
+        {
+            health = JsonNode.Parse(responseBody);
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return Results.Problem("Diagnostics health endpoint returned HTTP success but the response was not valid JSON; Diagnostics health was not proven.", statusCode: StatusCodes.Status503ServiceUnavailable);
+        }
+
+        return Results.Ok(new
+        {
+            reachable = true,
+            endpoint = new Uri(diagnosticsBaseUri, "health").ToString(),
+            requestedLevel = normalized,
+            note = "Current Aegis.Diagnostics does not expose the legacy /api/events ingestion endpoint. This probe verifies the current public health contract and does not claim that a diagnostic event was sent.",
+            diagnostics = health
+        });
     }
     catch (OperationCanceledException) when (!ct.IsCancellationRequested)
     {
-        return Results.Problem("Diagnostic event timed out and was not sent.", statusCode: StatusCodes.Status503ServiceUnavailable);
+        return Results.Problem("Diagnostics health check timed out; Diagnostics availability was not proven.", statusCode: StatusCodes.Status503ServiceUnavailable);
     }
     catch (HttpRequestException ex)
     {
-        return Results.Problem($"Diagnostic event was not sent: {ex.Message}", statusCode: StatusCodes.Status503ServiceUnavailable);
+        return Results.Problem($"Diagnostics health check failed: {ex.Message}", statusCode: StatusCodes.Status503ServiceUnavailable);
     }
 });
 
