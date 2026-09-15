@@ -3,6 +3,7 @@
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <UserSecretsId>Aegis.Hello-Development</UserSecretsId>
     <CommonRoot Condition="'$(CommonRoot)' == ''">..\Common</CommonRoot>
   </PropertyGroup>
   <ItemGroup>
