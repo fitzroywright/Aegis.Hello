@@ -1,0 +1,21 @@
+[Unit]
+Description=Aegis Hello Reference Registration App
+After=network-online.target aegis-configuration.service
+Wants=network-online.target
+Requires=aegis-configuration.service
+
+[Service]
+Type=simple
+User=aegis
+Group=aegis
+WorkingDirectory=/opt/aegis/hello
+ExecStart=/usr/bin/dotnet /opt/aegis/hello/Aegis.Hello.dll
+Environment=ASPNETCORE_ENVIRONMENT=Production
+Environment=ASPNETCORE_URLS=http://127.0.0.1:5400
+EnvironmentFile=/etc/aegis/hello.env
+Restart=always
+RestartSec=5
+SyslogIdentifier=aegis-hello
+
+[Install]
+WantedBy=multi-user.target
