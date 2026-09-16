@@ -8,5 +8,6 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="$(CommonRoot)\Common.Registration\Common.Registration.csproj" />
+    <ProjectReference Include="$(CommonRoot)\Common.Secrets\Common.Secrets.csproj" />
   </ItemGroup>
 </Project>
