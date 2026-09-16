@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Reflection;
 using System.Text.Json.Nodes;
+using Common.Diagnostics;
 using Common.Registration;
 using Common.Secrets;
 
@@ -57,7 +58,7 @@ async Task<JsonObject> BuildContractAsync(CancellationToken ct)
         ["diagnostics"] = new JsonObject
         {
             ["baseUrlConfigurationKey"] = "Aegis:PublicUrl",
-            ["healthPath"] = "/",
+            ["healthPath"] = "/health",
             ["supportsRemoteDiagnostics"] = false,
             ["supportsOperationalTelemetry"] = false,
             ["authenticationScheme"] = "None",
@@ -159,6 +160,8 @@ async Task<RegistrationResult> TryRegisterAsync(CancellationToken ct)
         lastRegistration = result;
     return result;
 }
+
+app.MapAegisHealth(applicationId);
 
 app.MapGet("/", () =>
 {
