@@ -3,14 +3,12 @@ using System.Net.Http.Json;
 using System.Reflection;
 using System.Text.Json.Nodes;
 using Common.Registration;
+using Common.Secrets;
 
 var builder = WebApplication.CreateBuilder(args);
 var configurationUrl = builder.Configuration["Aegis:Configuration:Url"]
     ?? builder.Configuration["Aegis:ConfigurationUrl"]
     ?? "http://localhost:5101/";
-var registrationKey = builder.Configuration["Aegis:Configuration:RegistrationKey"]
-    ?? builder.Configuration["Aegis:RegistrationKey"]
-    ?? Environment.GetEnvironmentVariable("AEGIS_CONFIGURATION_REGISTRATION_KEY");
 var diagnosticsUrl = builder.Configuration["Aegis:Diagnostics:Url"]
     ?? builder.Configuration["Aegis:DiagnosticsUrl"];
 
@@ -27,6 +25,8 @@ string hostName = Dns.GetHostName();
 
 var stateGate = new object();
 RegistrationResult? lastRegistration = null;
+RegistrationCredentialSource lastCredentialSource = RegistrationCredentialSource.Missing;
+string? lastCredentialProviderError = null;
 
 JsonObject BuildContract()
 {
@@ -103,9 +103,29 @@ JsonObject BuildContract()
 
 async Task<RegistrationResult> TryRegisterAsync(CancellationToken ct)
 {
-    if (string.IsNullOrWhiteSpace(registrationKey))
+    string registrationSecretName = RegistrationCredentialResolver.SecretNameFor(applicationId);
+    RegistrationCredentialResolution credential = await RegistrationCredentialResolver.ResolveAsync(
+        () => Environment.GetEnvironmentVariable(RegistrationCredentialResolver.EnvironmentVariableName),
+        async token =>
+        {
+            ISecretProvider provider = CommonSecretProviderFactory.Create(builder.Configuration);
+            return await provider.GetAsync(registrationSecretName, token).ConfigureAwait(false);
+        },
+        () => builder.Configuration[RegistrationCredentialResolver.AppSettingKey],
+        ct);
+
+    lock (stateGate)
     {
-        var failure = RegistrationResult.Failure("Configuration registration key is not configured.");
+        lastCredentialSource = credential.Source;
+        lastCredentialProviderError = credential.SecretProviderError;
+    }
+
+    if (!credential.Succeeded)
+    {
+        string detail = credential.SecretProviderError is null
+            ? "No credential was found in Environment, SecretProvider, or AppSetting."
+            : $"No credential was found in Environment, SecretProvider, or AppSetting. SecretProvider error: {credential.SecretProviderError}";
+        var failure = RegistrationResult.Failure(detail);
         lock (stateGate)
             lastRegistration = failure;
         return failure;
@@ -121,7 +141,7 @@ async Task<RegistrationResult> TryRegisterAsync(CancellationToken ct)
 
     var registrar = new ConfigurationRegistrar(
         app.Services.GetRequiredService<IHttpClientFactory>().CreateClient("configuration"),
-        new RegistrationOptions(baseUri, registrationKey, TimeSpan.FromSeconds(10)));
+        new RegistrationOptions(baseUri, credential.Credential, TimeSpan.FromSeconds(10)));
 
     RegistrationResult result = await registrar.RegisterContractAsync(BuildContract(), ct);
     lock (stateGate)
@@ -132,8 +152,14 @@ async Task<RegistrationResult> TryRegisterAsync(CancellationToken ct)
 app.MapGet("/", () =>
 {
     RegistrationResult? registration;
+    RegistrationCredentialSource credentialSource;
+    string? credentialProviderError;
     lock (stateGate)
+    {
         registration = lastRegistration;
+        credentialSource = lastCredentialSource;
+        credentialProviderError = lastCredentialProviderError;
+    }
 
     return Results.Ok(new
     {
@@ -143,6 +169,8 @@ app.MapGet("/", () =>
         environment = environmentName,
         host = hostName,
         requiredMessageConfigured = !string.IsNullOrWhiteSpace(builder.Configuration["Hello:RequiredMessage"]),
+        registrationCredentialSource = credentialSource.ToString(),
+        registrationCredentialProviderError = credentialProviderError,
         registration
     });
 });
@@ -190,7 +218,7 @@ app.MapPost("/diagnostics/{level}", async (string level, IHttpClientFactory clie
         if (!response.IsSuccessStatusCode)
             return Results.Problem($"Diagnostics health endpoint returned HTTP {(int)response.StatusCode}; Diagnostics availability was not proven.", statusCode: StatusCodes.Status503ServiceUnavailable);
 
-        JsonNode? health = null;
+        JsonNode? health;
         try
         {
             health = JsonNode.Parse(responseBody);
