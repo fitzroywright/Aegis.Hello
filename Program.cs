@@ -14,6 +14,7 @@ var diagnosticsUrl = builder.Configuration["Aegis:Diagnostics:Url"]
 
 builder.Services.AddHttpClient("configuration");
 builder.Services.AddHttpClient("diagnostics");
+builder.Services.AddCommonSecrets(builder.Configuration);
 
 var app = builder.Build();
 
@@ -28,12 +29,14 @@ RegistrationResult? lastRegistration = null;
 RegistrationCredentialSource lastCredentialSource = RegistrationCredentialSource.Missing;
 string? lastCredentialProviderError = null;
 
-JsonObject BuildContract()
+async Task<JsonObject> BuildContractAsync(CancellationToken ct)
 {
     bool requiredConfigured = !string.IsNullOrWhiteSpace(builder.Configuration["Hello:RequiredMessage"]);
     bool optionalConfigured = !string.IsNullOrWhiteSpace(builder.Configuration["Hello:OptionalLabel"]);
     string? publicUrl = builder.Configuration["Aegis:PublicUrl"];
     bool publicUrlConfigured = !string.IsNullOrWhiteSpace(publicUrl);
+    CommonSecretsHealth secretsHealth = await app.Services.GetRequiredService<ICommonSecretsHealthCheck>().CheckAsync(ct);
+    SecretProviderMetadata secretsMetadata = SecretProviderMetadataResolver.Resolve(builder.Configuration);
 
     return new JsonObject
     {
@@ -59,6 +62,13 @@ JsonObject BuildContract()
             ["supportsOperationalTelemetry"] = false,
             ["authenticationScheme"] = "None",
             ["supportedLevels"] = new JsonArray(1, 2, 3, 4, 5)
+        },
+        ["secrets"] = new JsonObject
+        {
+            ["provider"] = secretsHealth.ProviderName,
+            ["managementUrl"] = secretsMetadata.ManagementUrl,
+            ["connectionStatus"] = secretsHealth.IsAvailable ? "Healthy" : secretsHealth.IsConfigured ? "Unavailable" : "NotConfigured",
+            ["credentialStatus"] = secretsHealth.IsConfigured ? "Configured" : "NotConfigured"
         },
         ["requirements"] = new JsonArray
         {
@@ -108,7 +118,7 @@ async Task<RegistrationResult> TryRegisterAsync(CancellationToken ct)
         () => Environment.GetEnvironmentVariable(RegistrationCredentialResolver.EnvironmentVariableName),
         async token =>
         {
-            ISecretProvider provider = CommonSecretProviderFactory.Create(builder.Configuration);
+            ISecretProvider provider = app.Services.GetRequiredService<ISecretProvider>();
             return await provider.GetAsync(registrationSecretName, token).ConfigureAwait(false);
         },
         () => builder.Configuration[RegistrationCredentialResolver.AppSettingKey],
@@ -143,7 +153,8 @@ async Task<RegistrationResult> TryRegisterAsync(CancellationToken ct)
         app.Services.GetRequiredService<IHttpClientFactory>().CreateClient("configuration"),
         new RegistrationOptions(baseUri, credential.Credential, TimeSpan.FromSeconds(10)));
 
-    RegistrationResult result = await registrar.RegisterContractAsync(BuildContract(), ct);
+    JsonObject contract = await BuildContractAsync(ct);
+    RegistrationResult result = await registrar.RegisterContractAsync(contract, ct);
     lock (stateGate)
         lastRegistration = result;
     return result;
