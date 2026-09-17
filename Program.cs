@@ -115,27 +115,37 @@ async Task<JsonObject> BuildContractAsync(CancellationToken ct)
 async Task<RegistrationResult> TryRegisterAsync(CancellationToken ct)
 {
     string registrationSecretName = RegistrationCredentialResolver.SecretNameFor(applicationId);
-    RegistrationCredentialResolution credential = await RegistrationCredentialResolver.ResolveAsync(
-        () => Environment.GetEnvironmentVariable(RegistrationCredentialResolver.EnvironmentVariableName),
-        async token =>
-        {
-            ISecretProvider provider = app.Services.GetRequiredService<ISecretProvider>();
-            return await provider.GetAsync(registrationSecretName, token).ConfigureAwait(false);
-        },
-        () => builder.Configuration[RegistrationCredentialResolver.AppSettingKey],
-        ct);
+    string? registrationCredential;
+    string? providerError = null;
+
+    try
+    {
+        ISecretProvider provider = app.Services.GetRequiredService<ISecretProvider>();
+        registrationCredential = await provider.GetAsync(registrationSecretName, ct).ConfigureAwait(false);
+    }
+    catch (OperationCanceledException) when (ct.IsCancellationRequested)
+    {
+        throw;
+    }
+    catch (Exception exception)
+    {
+        registrationCredential = null;
+        providerError = exception.Message;
+    }
 
     lock (stateGate)
     {
-        lastCredentialSource = credential.Source;
-        lastCredentialProviderError = credential.SecretProviderError;
+        lastCredentialSource = string.IsNullOrWhiteSpace(registrationCredential)
+            ? RegistrationCredentialSource.Missing
+            : RegistrationCredentialSource.SecretProvider;
+        lastCredentialProviderError = providerError;
     }
 
-    if (!credential.Succeeded)
+    if (string.IsNullOrWhiteSpace(registrationCredential))
     {
-        string detail = credential.SecretProviderError is null
-            ? "No credential was found in Environment, SecretProvider, or AppSetting."
-            : $"No credential was found in Environment, SecretProvider, or AppSetting. SecretProvider error: {credential.SecretProviderError}";
+        string detail = providerError is null
+            ? $"Common.Secrets did not resolve required secret '{registrationSecretName}'."
+            : $"Common.Secrets could not resolve required secret '{registrationSecretName}': {providerError}";
         var failure = RegistrationResult.Failure(detail);
         lock (stateGate)
             lastRegistration = failure;
@@ -152,7 +162,7 @@ async Task<RegistrationResult> TryRegisterAsync(CancellationToken ct)
 
     var registrar = new ConfigurationRegistrar(
         app.Services.GetRequiredService<IHttpClientFactory>().CreateClient("configuration"),
-        new RegistrationOptions(baseUri, credential.Credential, TimeSpan.FromSeconds(10)));
+        new RegistrationOptions(baseUri, registrationCredential, TimeSpan.FromSeconds(10)));
 
     JsonObject contract = await BuildContractAsync(ct);
     RegistrationResult result = await registrar.RegisterContractAsync(contract, ct);
