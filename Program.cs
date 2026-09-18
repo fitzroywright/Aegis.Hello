@@ -46,6 +46,90 @@ void Record(string message, string? correlationId = null)
     }
 }
 
+
+async Task<JsonObject> BuildContractAsync(CancellationToken ct)
+{
+    bool requiredConfigured = !string.IsNullOrWhiteSpace(builder.Configuration["Hello:RequiredMessage"]);
+    bool optionalConfigured = !string.IsNullOrWhiteSpace(builder.Configuration["Hello:OptionalLabel"]);
+    string? publicUrl = builder.Configuration["Aegis:PublicUrl"];
+    bool publicUrlConfigured = !string.IsNullOrWhiteSpace(publicUrl);
+    CommonSecretsHealth secretsHealth = await app.Services
+        .GetRequiredService<ICommonSecretsHealthCheck>()
+        .CheckAsync(ct);
+
+    return new JsonObject
+    {
+        ["applicationId"] = applicationId,
+        ["displayName"] = "Aegis Hello",
+        ["version"] = version,
+        ["description"] = "Permanent registration and diagnostics contract test application.",
+        ["siteId"] = builder.Configuration["Site:Id"],
+        ["instanceId"] = instanceId,
+        ["runtimeEnvironment"] = new JsonObject
+        {
+            ["machineName"] = Environment.MachineName,
+            ["hostName"] = hostName,
+            ["hostingEnvironment"] = environmentName,
+            ["operatingSystem"] = System.Runtime.InteropServices.RuntimeInformation.OSDescription,
+            ["osArchitecture"] = System.Runtime.InteropServices.RuntimeInformation.OSArchitecture.ToString(),
+            ["processArchitecture"] = System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture.ToString(),
+            ["frameworkDescription"] = System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription,
+            ["processorCount"] = Environment.ProcessorCount
+        },
+        ["diagnostics"] = new JsonObject
+        {
+            ["baseUrlConfigurationKey"] = "Aegis:PublicUrl",
+            ["healthPath"] = "/health",
+            ["supportsRemoteDiagnostics"] = false,
+            ["supportsOperationalTelemetry"] = true,
+            ["authenticationScheme"] = "AegisRegistration",
+            ["supportedLevels"] = new JsonArray(1, 2, 3, 4, 5)
+        },
+        ["secrets"] = new JsonObject
+        {
+            ["provider"] = secretsHealth.ProviderName,
+            ["connectionStatus"] = secretsHealth.IsAvailable ? "Healthy" : secretsHealth.IsConfigured ? "Unavailable" : "NotConfigured",
+            ["credentialStatus"] = secretsHealth.IsConfigured ? "Configured" : "NotConfigured"
+        },
+        ["requirements"] = new JsonArray
+        {
+            new JsonObject
+            {
+                ["id"] = "public-url",
+                ["displayName"] = "Public URL",
+                ["kind"] = "Configuration",
+                ["required"] = true,
+                ["purpose"] = "Provides the network-reachable Hello endpoint that Diagnostics can discover and probe.",
+                ["configurationKey"] = "Aegis:PublicUrl",
+                ["isConfigured"] = publicUrlConfigured,
+                ["configurationState"] = publicUrlConfigured ? "Configured" : "Missing"
+            },
+            new JsonObject
+            {
+                ["id"] = "required-message",
+                ["displayName"] = "Required Message",
+                ["kind"] = "Configuration",
+                ["required"] = true,
+                ["purpose"] = "Proves required configuration state reporting without exposing its value.",
+                ["configurationKey"] = "Hello:RequiredMessage",
+                ["isConfigured"] = requiredConfigured,
+                ["configurationState"] = requiredConfigured ? "Configured" : "Missing"
+            },
+            new JsonObject
+            {
+                ["id"] = "optional-label",
+                ["displayName"] = "Optional Label",
+                ["kind"] = "Configuration",
+                ["required"] = false,
+                ["purpose"] = "Proves optional configuration state reporting without exposing its value.",
+                ["configurationKey"] = "Hello:OptionalLabel",
+                ["isConfigured"] = optionalConfigured,
+                ["configurationState"] = optionalConfigured ? "Configured" : "OptionalNotConfigured"
+            }
+        }
+    };
+}
+
 async Task<JsonObject> BuildMetadataAsync(CancellationToken ct)
 {
     CommonSecretsHealth secretsHealth = await app.Services
@@ -86,7 +170,20 @@ RegistrationLifecycleClient CreateRegistrationClient()
 async Task<RegistrationLifecycleStatus> RegistrationStepAsync(CancellationToken ct)
 {
     JsonObject metadata = await BuildMetadataAsync(ct);
-    RegistrationLifecycleStatus result = await CreateRegistrationClient().StepAsync(metadata, ct);
+    RegistrationLifecycleClient registration = CreateRegistrationClient();
+    RegistrationLifecycleStatus result = await registration.StepAsync(metadata, ct);
+
+    if (result.IsRegistered)
+    {
+        HttpStatusCode contractStatus = await registration.PublishConfigurationContractAsync(
+            await BuildContractAsync(ct),
+            ct);
+
+        if ((int)contractStatus is >= 200 and < 300)
+            Record("Configuration contract published", result.CorrelationId);
+        else
+            Record($"Configuration contract publication failed: HTTP {(int)contractStatus}", result.CorrelationId);
+    }
 
     lock (stateGate)
         lastRegistration = result;
