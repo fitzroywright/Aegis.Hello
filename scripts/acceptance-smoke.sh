@@ -112,6 +112,27 @@ if [[ -n "$payload" ]]; then
   fi
 fi
 
+if [[ -n "$payload" ]]; then
+  registration_state="$(python3 -c 'import json,sys; d=json.load(sys.stdin); print((d.get("registration") or {}).get("state") or "")' <<<"$payload")"
+  contract_healthy="$(python3 -c 'import json,sys; d=json.load(sys.stdin); print(str((d.get("configurationContract") or {}).get("healthy")).lower())' <<<"$payload")"
+  contract_status="$(python3 -c 'import json,sys; d=json.load(sys.stdin); print((d.get("configurationContract") or {}).get("lastStatusCode") or "")' <<<"$payload")"
+
+  if [[ "$registration_state" == "Registered" ]]; then
+    if [[ "$contract_healthy" == "true" ]]; then
+      result PASS "Configuration contract health" "registered identity published contract successfully (HTTP $contract_status)"
+    else
+      result FAIL "Configuration contract health" "registered identity has no successful contract publication (HTTP ${contract_status:-unknown})"
+    fi
+  else
+    result BLOCKED "Configuration contract health" "registration state is ${registration_state:-unknown}"
+  fi
+
+  if grep -Eqi '"(credential|claimToken|registrationKey)"[[:space:]]*:[[:space:]]*"[^"]+"' <<<"$payload"; then
+    result FAIL "Status secret leakage scan" "status.json appears to expose credential material"
+  else
+    result PASS "Status secret leakage scan" "status.json exposes no credential/claim values"
+  fi
+fi
 if [[ -f "$IDENTITY_FILE" ]] && grep -aEq 'AEGIS_REGISTRATION_KEY|ConfigurationRegistrationKey' "$IDENTITY_FILE"; then
   result FAIL "Identity file legacy-string scan" "legacy registration term found"
 elif [[ -f "$IDENTITY_FILE" ]]; then
