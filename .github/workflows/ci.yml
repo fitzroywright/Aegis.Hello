@@ -20,6 +20,18 @@ jobs:
           repository: fitzroywright/Common.Registration
           path: Common/Common.Registration
 
+      - name: Checkout Common.Diagnostics
+        uses: actions/checkout@v4
+        with:
+          repository: fitzroywright/Common.Diagnostics
+          path: Common/Common.Diagnostics
+
+      - name: Checkout Common.Secrets
+        uses: actions/checkout@v4
+        with:
+          repository: fitzroywright/Common.Secrets
+          path: Common/Common.Secrets
+
       - name: Setup .NET 10
         uses: actions/setup-dotnet@v4
         with:
