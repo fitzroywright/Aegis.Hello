@@ -1,19 +1,20 @@
 using System.Net;
-using System.Net.Http.Json;
 using System.Reflection;
+using System.Text.Encodings.Web;
 using System.Text.Json.Nodes;
 using Common.Diagnostics;
 using Common.Registration;
 using Common.Secrets;
 
 var builder = WebApplication.CreateBuilder(args);
-var operationsUrl = builder.Configuration["Aegis:Operations:Url"]
-    ?? builder.Configuration["AegisOperations:BaseUrl"]
-    ?? "http://localhost:5100/";
-var diagnosticsUrl = builder.Configuration["Aegis:Diagnostics:Url"]
-    ?? builder.Configuration["Aegis:DiagnosticsUrl"];
 
-builder.Services.AddHttpClient("operations");
+string configurationUrl = builder.Configuration["Aegis:Configuration:Url"]
+    ?? "https://config.ffpja.org/";
+string diagnosticsUrl = builder.Configuration["Aegis:Diagnostics:Url"]
+    ?? builder.Configuration["Aegis:DiagnosticsUrl"]
+    ?? string.Empty;
+
+builder.Services.AddHttpClient("configuration-registration");
 builder.Services.AddHttpClient("diagnostics");
 builder.Services.AddCommonSecrets(builder.Configuration);
 
@@ -24,119 +25,73 @@ const string component = "Web";
 string version = Assembly.GetEntryAssembly()?.GetName().Version?.ToString() ?? "unknown";
 string environmentName = app.Environment.EnvironmentName;
 string hostName = Dns.GetHostName();
+string instanceId = builder.Configuration["Aegis:Registration:InstanceId"]?.Trim()
+    ?? environmentName;
+string identityFile = builder.Configuration["Aegis:Registration:IdentityFile"]?.Trim()
+    ?? (OperatingSystem.IsWindows()
+        ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "Aegis", "Hello", "registration-identity.json")
+        : "/var/lib/aegis/hello/registration-identity.json");
 
 var stateGate = new object();
-ApplicationRegistrationStatus? lastRegistration = null;
+RegistrationLifecycleStatus? lastRegistration = null;
+var timeline = new Queue<TimelineEvent>();
 
-async Task<JsonObject> BuildContractAsync(CancellationToken ct)
+void Record(string message, string? correlationId = null)
 {
-    bool requiredConfigured = !string.IsNullOrWhiteSpace(builder.Configuration["Hello:RequiredMessage"]);
-    bool optionalConfigured = !string.IsNullOrWhiteSpace(builder.Configuration["Hello:OptionalLabel"]);
-    string? publicUrl = builder.Configuration["Aegis:PublicUrl"];
-    bool publicUrlConfigured = !string.IsNullOrWhiteSpace(publicUrl);
-    CommonSecretsHealth secretsHealth = await app.Services.GetRequiredService<ICommonSecretsHealthCheck>().CheckAsync(ct);
-    SecretProviderMetadata secretsMetadata = SecretProviderMetadataResolver.Resolve(builder.Configuration);
+    lock (stateGate)
+    {
+        timeline.Enqueue(new(DateTimeOffset.UtcNow, message, correlationId));
+        while (timeline.Count > 50)
+            timeline.Dequeue();
+    }
+}
+
+async Task<JsonObject> BuildMetadataAsync(CancellationToken ct)
+{
+    CommonSecretsHealth secretsHealth = await app.Services
+        .GetRequiredService<ICommonSecretsHealthCheck>()
+        .CheckAsync(ct);
 
     return new JsonObject
     {
-        ["applicationId"] = applicationId,
         ["displayName"] = "Aegis Hello",
-        ["version"] = version,
-        ["description"] = "Permanent registration and diagnostics contract test application.",
-        ["runtimeEnvironment"] = new JsonObject
-        {
-            ["machineName"] = Environment.MachineName,
-            ["hostName"] = hostName,
-            ["hostingEnvironment"] = environmentName,
-            ["operatingSystem"] = Environment.OSVersion.ToString(),
-            ["processArchitecture"] = System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture.ToString(),
-            ["frameworkDescription"] = System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription,
-            ["processorCount"] = Environment.ProcessorCount
-        },
-        ["diagnostics"] = new JsonObject
-        {
-            ["baseUrlConfigurationKey"] = "Aegis:PublicUrl",
-            ["healthPath"] = "/health",
-            ["supportsRemoteDiagnostics"] = false,
-            ["supportsOperationalTelemetry"] = false,
-            ["authenticationScheme"] = "None",
-            ["supportedLevels"] = new JsonArray(1, 2, 3, 4, 5)
-        },
-        ["secrets"] = new JsonObject
-        {
-            ["provider"] = secretsHealth.ProviderName,
-            ["managementUrl"] = secretsMetadata.ManagementUrl,
-            ["connectionStatus"] = secretsHealth.IsAvailable ? "Healthy" : secretsHealth.IsConfigured ? "Unavailable" : "NotConfigured",
-            ["credentialStatus"] = secretsHealth.IsConfigured ? "Configured" : "NotConfigured"
-        },
-        ["requirements"] = new JsonArray
-        {
-            new JsonObject
-            {
-                ["id"] = "public-url",
-                ["displayName"] = "Public URL",
-                ["kind"] = "Configuration",
-                ["required"] = true,
-                ["purpose"] = "Provides the network-reachable Hello endpoint that Diagnostics can discover and probe.",
-                ["configurationKey"] = "Aegis:PublicUrl",
-                ["isConfigured"] = publicUrlConfigured,
-                ["effectiveValueAvailable"] = publicUrlConfigured,
-                ["configurationState"] = publicUrlConfigured ? "Configured" : "Missing",
-                ["safeDisplayValue"] = publicUrlConfigured ? publicUrl : null
-            },
-            new JsonObject
-            {
-                ["id"] = "required-message",
-                ["displayName"] = "Required Message",
-                ["kind"] = "Configuration",
-                ["required"] = true,
-                ["purpose"] = "Proves that a required setting can move between missing and configured states without exposing its value.",
-                ["configurationKey"] = "Hello:RequiredMessage",
-                ["isConfigured"] = requiredConfigured,
-                ["configurationState"] = requiredConfigured ? "Configured" : "Missing"
-            },
-            new JsonObject
-            {
-                ["id"] = "optional-label",
-                ["displayName"] = "Optional Label",
-                ["kind"] = "Configuration",
-                ["required"] = false,
-                ["purpose"] = "Proves optional configuration state reporting without exposing its value.",
-                ["configurationKey"] = "Hello:OptionalLabel",
-                ["isConfigured"] = optionalConfigured,
-                ["configurationState"] = optionalConfigured ? "Configured" : "OptionalNotConfigured"
-            }
-        }
+        ["applicationVersion"] = version,
+        ["environment"] = environmentName,
+        ["hostname"] = hostName,
+        ["operatingSystem"] = System.Runtime.InteropServices.RuntimeInformation.OSDescription,
+        ["architecture"] = System.Runtime.InteropServices.RuntimeInformation.OSArchitecture.ToString(),
+        ["framework"] = System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription,
+        ["publicUrl"] = builder.Configuration["Aegis:PublicUrl"],
+        ["secretsProvider"] = secretsHealth.ProviderName,
+        ["capabilities"] = new JsonArray("health", "registration-reference", "diagnostics-probe")
     };
 }
 
-async Task<ApplicationRegistrationStatus> TryRegisterAsync(CancellationToken ct)
+RegistrationLifecycleClient CreateRegistrationClient()
 {
-    if (!Uri.TryCreate(operationsUrl.TrimEnd('/') + "/", UriKind.Absolute, out Uri? baseUri))
-    {
-        var failure = new ApplicationRegistrationStatus(
-            ApplicationRegistrationState.Unavailable,
-            DateTimeOffset.UtcNow,
-            "Operations URL is invalid.");
-        lock (stateGate)
-            lastRegistration = failure;
-        return failure;
-    }
+    if (!Uri.TryCreate(configurationUrl.TrimEnd('/') + "/", UriKind.Absolute, out Uri? baseUri))
+        throw new InvalidOperationException("Aegis Configuration URL is invalid.");
 
-    JsonObject contract = await BuildContractAsync(ct);
-    var registration = new ApplicationRegistrationClient(
-        app.Services.GetRequiredService<IHttpClientFactory>().CreateClient("operations"),
-        new ApplicationRegistrationOptions(
+    return new RegistrationLifecycleClient(
+        app.Services.GetRequiredService<IHttpClientFactory>().CreateClient("configuration-registration"),
+        new RegistrationLifecycleOptions(
             baseUri,
             applicationId,
-            hostName,
-            RegistrationCredentialResolver.EnvironmentVariableName,
+            instanceId,
+            identityFile,
             TimeSpan.FromSeconds(10)),
         logger: app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("Aegis.Hello.Registration"));
+}
 
-    ApplicationRegistrationStatus result = await registration.RegisterAsync(contract, ct);
+async Task<RegistrationLifecycleStatus> RegistrationStepAsync(CancellationToken ct)
+{
+    JsonObject metadata = await BuildMetadataAsync(ct);
+    RegistrationLifecycleStatus result = await CreateRegistrationClient().StepAsync(metadata, ct);
+
     lock (stateGate)
         lastRegistration = result;
+
+    Record($"Registration state: {result.State}", result.CorrelationId);
     return result;
 }
 
@@ -144,10 +99,81 @@ app.MapAegisHealth(applicationId);
 
 app.MapGet("/", () =>
 {
-    ApplicationRegistrationStatus? registration;
+    RegistrationLifecycleStatus? registration;
+    TimelineEvent[] events;
     lock (stateGate)
     {
         registration = lastRegistration;
+        events = timeline.Reverse().Take(12).Reverse().ToArray();
+    }
+
+    string state = registration?.State.ToString() ?? "Starting";
+    string stateClass = registration?.State switch
+    {
+        RegistrationLifecycleState.Registered => "good",
+        RegistrationLifecycleState.Pending or RegistrationLifecycleState.RecoveryPending => "warn",
+        RegistrationLifecycleState.Unregistered => "neutral",
+        _ => "bad"
+    };
+
+    string eventRows = events.Length == 0
+        ? "<div class='empty'>No lifecycle events recorded yet.</div>"
+        : string.Join("", events.Select(x =>
+            $"<div class='event'><time>{x.AtUtc:HH:mm:ss}</time><span>{E(x.Message)}</span><code>{E(x.CorrelationId)}</code></div>"));
+
+    string error = string.IsNullOrWhiteSpace(registration?.Error)
+        ? string.Empty
+        : $"<div class='error'><b>Registration detail</b><span>{E(registration.Error)}</span></div>";
+
+    string html = $$"""
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Aegis Hello</title>
+<style>
+body{margin:0;background:#071522;color:#edf7ff;font:14px Segoe UI,Arial,sans-serif}main{max-width:1050px;margin:35px auto;padding:0 22px}
+h1{font-size:30px;margin-bottom:4px}.muted{color:#9fb7c8}.grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.panel{background:#0d2030;border:1px solid #28597b;border-radius:10px;padding:18px;margin:16px 0}
+.facts{display:grid;grid-template-columns:1fr 1fr;gap:12px}.fact{background:#081824;border-radius:7px;padding:12px}.fact small{display:block;color:#91aabd;margin-bottom:4px}.fact b{word-break:break-word}
+.badge{display:inline-block;padding:7px 11px;border-radius:999px;font-weight:800}.good{background:#145b40}.warn{background:#72531b}.bad{background:#7d2f2f}.neutral{background:#34495a}
+.event{display:grid;grid-template-columns:80px 1fr 220px;gap:12px;padding:9px 0;border-bottom:1px solid #29475b}.event code{font-size:11px;color:#9fc9e8;overflow:hidden;text-overflow:ellipsis}.error{display:flex;gap:10px;background:#4a2020;border:1px solid #8d3d3d;padding:12px;border-radius:7px}.empty{color:#91aabd}
+a{color:#72c4ff}@media(max-width:720px){.grid,.facts{grid-template-columns:1fr}.event{grid-template-columns:70px 1fr}.event code{display:none}}
+</style></head>
+<body><main>
+<h1>Aegis Hello</h1><p class="muted">Registration reference implementation and service status</p>
+<div class="grid">
+<section class="panel"><h2>Identity</h2><div class="facts">
+<div class="fact"><small>APPLICATION</small><b>{{E(applicationId)}}</b></div>
+<div class="fact"><small>INSTANCE</small><b>{{E(instanceId)}}</b></div>
+<div class="fact"><small>INSTALLATION ID</small><b>{{E(registration?.Identity.InstallationId)}}</b></div>
+<div class="fact"><small>VERSION</small><b>{{E(version)}}</b></div>
+<div class="fact"><small>HOST</small><b>{{E(hostName)}}</b></div>
+<div class="fact"><small>ENVIRONMENT</small><b>{{E(environmentName)}}</b></div>
+</div></section>
+<section class="panel"><h2>Registration</h2><p><span class="badge {{stateClass}}">{{E(state)}}</span></p>
+<div class="facts"><div class="fact"><small>REGISTRATION ID</small><b>{{E(registration?.RegistrationId)}}</b></div>
+<div class="fact"><small>LAST OBSERVED</small><b>{{E(registration?.ObservedAtUtc.ToString("u"))}}</b></div></div>{{error}}</section>
+</div>
+<section class="panel"><h2>Connectivity</h2><div class="facts">
+<div class="fact"><small>CONFIGURATION</small><b>{{E(configurationUrl)}}</b></div>
+<div class="fact"><small>DIAGNOSTICS</small><b>{{E(diagnosticsUrl)}}</b></div>
+</div></section>
+<section class="panel"><h2>Lifecycle timeline</h2>{{eventRows}}</section>
+<p class="muted">Machine-readable status: <a href="/status.json">/status.json</a>. No credentials or claim tokens are exposed.</p>
+</main></body></html>
+""";
+
+    return Results.Content(html, "text/html; charset=utf-8");
+});
+
+app.MapGet("/status.json", () =>
+{
+    RegistrationLifecycleStatus? registration;
+    TimelineEvent[] events;
+    lock (stateGate)
+    {
+        registration = lastRegistration;
+        events = timeline.ToArray();
     }
 
     return Results.Ok(new
@@ -157,24 +183,35 @@ app.MapGet("/", () =>
         version,
         environment = environmentName,
         host = hostName,
-        requiredMessageConfigured = !string.IsNullOrWhiteSpace(builder.Configuration["Hello:RequiredMessage"]),
-        registrationEnvironmentVariable = RegistrationCredentialResolver.EnvironmentVariableName,
-        registration
+        instanceId,
+        installationId = registration?.Identity.InstallationId,
+        registration = registration is null ? null : new
+        {
+            state = registration.State.ToString(),
+            registration.RegistrationId,
+            registration.ObservedAtUtc,
+            registration.Error,
+            registration.StatusCode,
+            registration.CorrelationId
+        },
+        timeline = events
     });
 });
 
-app.MapPost("/register", async (CancellationToken ct) =>
+app.MapPost("/registration/step", async (CancellationToken ct) =>
 {
-    ApplicationRegistrationStatus result = await TryRegisterAsync(ct);
-    return result.IsRegistered
+    RegistrationLifecycleStatus result = await RegistrationStepAsync(ct);
+    return result.State is RegistrationLifecycleState.Registered or
+        RegistrationLifecycleState.Pending or
+        RegistrationLifecycleState.RecoveryPending
         ? Results.Ok(result)
         : Results.Json(result, statusCode: StatusCodes.Status503ServiceUnavailable);
 });
 
 app.MapGet("/config-state", () =>
 {
-    var requiredConfigured = !string.IsNullOrWhiteSpace(builder.Configuration["Hello:RequiredMessage"]);
-    var optionalConfigured = !string.IsNullOrWhiteSpace(builder.Configuration["Hello:OptionalLabel"]);
+    bool requiredConfigured = !string.IsNullOrWhiteSpace(builder.Configuration["Hello:RequiredMessage"]);
+    bool optionalConfigured = !string.IsNullOrWhiteSpace(builder.Configuration["Hello:OptionalLabel"]);
     return Results.Ok(new
     {
         requirements = new object[]
@@ -188,52 +225,29 @@ app.MapGet("/config-state", () =>
 app.MapPost("/diagnostics/{level}", async (string level, IHttpClientFactory clients, CancellationToken ct) =>
 {
     if (string.IsNullOrWhiteSpace(diagnosticsUrl))
-        return Results.Problem("Aegis Diagnostics URL is not configured; Diagnostics availability was not checked.", statusCode: StatusCodes.Status503ServiceUnavailable);
+        return Results.Problem("Aegis Diagnostics URL is not configured.", statusCode: 503);
 
-    var normalized = level.ToLowerInvariant();
+    string normalized = level.ToLowerInvariant();
     if (normalized is not ("info" or "warning" or "error"))
         return Results.BadRequest(new { error = "Level must be info, warning, or error." });
 
-    if (!Uri.TryCreate(diagnosticsUrl.TrimEnd('/') + "/", UriKind.Absolute, out Uri? diagnosticsBaseUri))
-        return Results.Problem("Aegis Diagnostics URL is invalid; Diagnostics availability was not checked.", statusCode: StatusCodes.Status503ServiceUnavailable);
+    if (!Uri.TryCreate(diagnosticsUrl.TrimEnd('/') + "/health", UriKind.Absolute, out Uri? uri))
+        return Results.Problem("Aegis Diagnostics URL is invalid.", statusCode: 503);
 
     try
     {
-        var client = clients.CreateClient("diagnostics");
-        using var response = await client.GetAsync(new Uri(diagnosticsBaseUri, "health"), ct);
-        string responseBody = await response.Content.ReadAsStringAsync(ct);
-
-        if (!response.IsSuccessStatusCode)
-            return Results.Problem($"Diagnostics health endpoint returned HTTP {(int)response.StatusCode}; Diagnostics availability was not proven.", statusCode: StatusCodes.Status503ServiceUnavailable);
-
-        JsonNode? health;
-        try
-        {
-            health = JsonNode.Parse(responseBody);
-        }
-        catch (System.Text.Json.JsonException)
-        {
-            return Results.Problem("Diagnostics health endpoint returned HTTP success but the response was not valid JSON; Diagnostics health was not proven.", statusCode: StatusCodes.Status503ServiceUnavailable);
-        }
-
-        return Results.Ok(new
-        {
-            reachable = true,
-            endpoint = new Uri(diagnosticsBaseUri, "health").ToString(),
-            requestedLevel = normalized,
-            note = "Current Aegis.Diagnostics does not expose the legacy /api/events ingestion endpoint. This probe verifies the current public health contract and does not claim that a diagnostic event was sent.",
-            diagnostics = health
-        });
+        using HttpResponseMessage response = await clients.CreateClient("diagnostics").GetAsync(uri, ct);
+        return response.IsSuccessStatusCode
+            ? Results.Ok(new { reachable = true, endpoint = uri.ToString(), requestedLevel = normalized })
+            : Results.Problem($"Diagnostics returned HTTP {(int)response.StatusCode}.", statusCode: 503);
     }
-    catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+    catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
     {
-        return Results.Problem("Diagnostics health check timed out; Diagnostics availability was not proven.", statusCode: StatusCodes.Status503ServiceUnavailable);
-    }
-    catch (HttpRequestException ex)
-    {
-        return Results.Problem($"Diagnostics health check failed: {ex.Message}", statusCode: StatusCodes.Status503ServiceUnavailable);
+        return Results.Problem($"Diagnostics health check failed: {ex.Message}", statusCode: 503);
     }
 });
+
+Record("Application started");
 
 app.Lifetime.ApplicationStarted.Register(() =>
 {
@@ -242,42 +256,34 @@ app.Lifetime.ApplicationStarted.Register(() =>
         CancellationToken stopping = app.Lifetime.ApplicationStopping;
         while (!stopping.IsCancellationRequested)
         {
-            ApplicationRegistrationStatus result;
             try
             {
-                result = await TryRegisterAsync(stopping);
-            }
-            catch (OperationCanceledException) when (stopping.IsCancellationRequested)
-            {
-                return;
-            }
-            catch (Exception exception)
-            {
-                ILogger registrationLogger = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("Aegis.Hello.Registration");
-                using IDisposable? scope = registrationLogger.BeginScope(new Dictionary<string, object?>
+                RegistrationLifecycleStatus result = await RegistrationStepAsync(stopping);
+                TimeSpan delay = result.State switch
                 {
-                    ["Activity"] = "Registration",
-                    ["Application"] = applicationId,
-                    ["RegistrationAttemptId"] = Guid.NewGuid().ToString("N"),
-                    ["Stage"] = "UnhandledFailure"
-                });
-                registrationLogger.LogWarning(exception, "Unhandled exception during registration attempt.");
-                result = new ApplicationRegistrationStatus(ApplicationRegistrationState.Unavailable, DateTimeOffset.UtcNow, exception.Message);
-            }
-
-            if (result.IsRegistered)
-                return;
-
-            try
-            {
-                await Task.Delay(TimeSpan.FromSeconds(30), stopping);
+                    RegistrationLifecycleState.Registered => TimeSpan.FromMinutes(5),
+                    RegistrationLifecycleState.Pending or RegistrationLifecycleState.RecoveryPending => TimeSpan.FromSeconds(10),
+                    RegistrationLifecycleState.IdentityConflict or RegistrationLifecycleState.Rejected => TimeSpan.FromMinutes(1),
+                    _ => TimeSpan.FromSeconds(30)
+                };
+                await Task.Delay(delay, stopping);
             }
             catch (OperationCanceledException) when (stopping.IsCancellationRequested)
             {
                 return;
+            }
+            catch (Exception ex)
+            {
+                Record("Registration error: " + ex.GetType().Name);
+                app.Logger.LogWarning(ex, "Hello registration lifecycle step failed.");
+                try { await Task.Delay(TimeSpan.FromSeconds(30), stopping); }
+                catch (OperationCanceledException) when (stopping.IsCancellationRequested) { return; }
             }
         }
     });
 });
 
 app.Run();
+
+static string E(string? value) => HtmlEncoder.Default.Encode(value ?? "—");
+internal sealed record TimelineEvent(DateTimeOffset AtUtc, string Message, string? CorrelationId);
