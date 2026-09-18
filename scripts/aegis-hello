@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+BASE_URL="${AEGIS_HELLO_URL:-http://127.0.0.1:5400}"
+
+case "${1:-status}" in
+  status)
+    if [[ "${2:-}" == "--json" ]]; then
+      curl -fsS "$BASE_URL/status.json"
+      printf '\n'
+      exit 0
+    fi
+
+    payload="$(curl -fsS "$BASE_URL/status.json")"
+    python3 - "$payload" <<'PY'
+import json, sys
+d=json.loads(sys.argv[1])
+r=d.get("registration") or {}
+print("AEGIS HELLO STATUS")
+print()
+rows=[
+ ("Application", d.get("application")),
+ ("Instance", d.get("instanceId")),
+ ("Registration", r.get("state") or "Starting"),
+ ("Installation", d.get("installationId")),
+ ("Host", d.get("host")),
+ ("Environment", d.get("environment")),
+ ("Last Observed", r.get("observedAtUtc")),
+ ("Correlation", r.get("correlationId")),
+]
+for k,v in rows:
+    print(f"{k:<18}{v or '—'}")
+if r.get("error"):
+    print(f"{'Detail':<18}{r['error']}")
+PY
+    ;;
+  *)
+    echo "Usage: aegis-hello status [--json]" >&2
+    exit 2
+    ;;
+esac
