@@ -53,6 +53,7 @@ chown aegis:aegis "$HELLO_ENV"
 chmod 0600 "$HELLO_ENV"
 
 install -m 0644 "$SOURCE_DIR/deploy/kratos/aegis-hello.service" "$SERVICE_FILE"
+install -m 0755 "$SOURCE_DIR/scripts/aegis-hello" /usr/local/bin/aegis-hello
 systemctl daemon-reload
 systemctl enable aegis-hello.service
 systemctl restart aegis-hello.service
