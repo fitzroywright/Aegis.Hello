@@ -34,6 +34,8 @@ string identityFile = builder.Configuration["Aegis:Registration:IdentityFile"]?.
 
 var stateGate = new object();
 RegistrationLifecycleStatus? lastRegistration = null;
+HttpStatusCode? lastContractStatus = null;
+DateTimeOffset? lastContractAttemptAtUtc = null;
 var timeline = new Queue<TimelineEvent>();
 
 void Record(string message, string? correlationId = null)
@@ -179,6 +181,12 @@ async Task<RegistrationLifecycleStatus> RegistrationStepAsync(CancellationToken 
             await BuildContractAsync(ct),
             ct);
 
+        lock (stateGate)
+        {
+            lastContractStatus = contractStatus;
+            lastContractAttemptAtUtc = DateTimeOffset.UtcNow;
+        }
+
         if ((int)contractStatus is >= 200 and < 300)
             Record("Configuration contract published", result.CorrelationId);
         else
@@ -266,10 +274,14 @@ a{color:#72c4ff}@media(max-width:720px){.grid,.facts{grid-template-columns:1fr}.
 app.MapGet("/status.json", () =>
 {
     RegistrationLifecycleStatus? registration;
+    HttpStatusCode? contractStatus;
+    DateTimeOffset? contractAttemptAt;
     TimelineEvent[] events;
     lock (stateGate)
     {
         registration = lastRegistration;
+        contractStatus = lastContractStatus;
+        contractAttemptAt = lastContractAttemptAtUtc;
         events = timeline.ToArray();
     }
 
@@ -290,6 +302,12 @@ app.MapGet("/status.json", () =>
             registration.Error,
             registration.StatusCode,
             registration.CorrelationId
+        },
+        configurationContract = new
+        {
+            lastStatusCode = contractStatus is null ? null : (int?)contractStatus,
+            healthy = contractStatus is not null && (int)contractStatus is >= 200 and < 300,
+            lastAttemptAtUtc = contractAttemptAt
         },
         timeline = events
     });
