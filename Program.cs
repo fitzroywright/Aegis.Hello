@@ -131,7 +131,8 @@ async Task<ApplicationRegistrationStatus> TryRegisterAsync(CancellationToken ct)
             applicationId,
             hostName,
             RegistrationCredentialResolver.EnvironmentVariableName,
-            TimeSpan.FromSeconds(10)));
+            TimeSpan.FromSeconds(10)),
+        logger: app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("Aegis.Hello.Registration"));
 
     ApplicationRegistrationStatus result = await registration.RegisterAsync(contract, ct);
     lock (stateGate)
@@ -249,6 +250,19 @@ app.Lifetime.ApplicationStarted.Register(() =>
             catch (OperationCanceledException) when (stopping.IsCancellationRequested)
             {
                 return;
+            }
+            catch (Exception exception)
+            {
+                ILogger registrationLogger = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("Aegis.Hello.Registration");
+                using IDisposable? scope = registrationLogger.BeginScope(new Dictionary<string, object?>
+                {
+                    ["Activity"] = "Registration",
+                    ["Application"] = applicationId,
+                    ["RegistrationAttemptId"] = Guid.NewGuid().ToString("N"),
+                    ["Stage"] = "UnhandledFailure"
+                });
+                registrationLogger.LogWarning(exception, "Unhandled exception during registration attempt.");
+                result = new ApplicationRegistrationStatus(ApplicationRegistrationState.Unavailable, DateTimeOffset.UtcNow, exception.Message);
             }
 
             if (result.IsRegistered)
