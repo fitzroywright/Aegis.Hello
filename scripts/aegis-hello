@@ -27,6 +27,9 @@ rows=[
  ("Environment", d.get("environment")),
  ("Last Observed", r.get("observedAtUtc")),
  ("Correlation", r.get("correlationId")),
+ ("Contract HTTP", (d.get("configurationContract") or {}).get("lastStatusCode")),
+ ("Contract Healthy", (d.get("configurationContract") or {}).get("healthy")),
+ ("Contract Attempt", (d.get("configurationContract") or {}).get("lastAttemptAtUtc")),
 ]
 for k,v in rows:
     print(f"{k:<18}{v or '—'}")
