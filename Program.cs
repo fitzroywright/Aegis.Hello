@@ -7,13 +7,13 @@ using Common.Registration;
 using Common.Secrets;
 
 var builder = WebApplication.CreateBuilder(args);
-var configurationUrl = builder.Configuration["Aegis:Configuration:Url"]
-    ?? builder.Configuration["Aegis:ConfigurationUrl"]
-    ?? "http://localhost:5101/";
+var operationsUrl = builder.Configuration["Aegis:Operations:Url"]
+    ?? builder.Configuration["AegisOperations:BaseUrl"]
+    ?? "http://localhost:5100/";
 var diagnosticsUrl = builder.Configuration["Aegis:Diagnostics:Url"]
     ?? builder.Configuration["Aegis:DiagnosticsUrl"];
 
-builder.Services.AddHttpClient("configuration");
+builder.Services.AddHttpClient("operations");
 builder.Services.AddHttpClient("diagnostics");
 builder.Services.AddCommonSecrets(builder.Configuration);
 
@@ -26,9 +26,7 @@ string environmentName = app.Environment.EnvironmentName;
 string hostName = Dns.GetHostName();
 
 var stateGate = new object();
-RegistrationResult? lastRegistration = null;
-RegistrationCredentialSource lastCredentialSource = RegistrationCredentialSource.Missing;
-string? lastCredentialProviderError = null;
+ApplicationRegistrationStatus? lastRegistration = null;
 
 async Task<JsonObject> BuildContractAsync(CancellationToken ct)
 {
@@ -112,60 +110,30 @@ async Task<JsonObject> BuildContractAsync(CancellationToken ct)
     };
 }
 
-async Task<RegistrationResult> TryRegisterAsync(CancellationToken ct)
+async Task<ApplicationRegistrationStatus> TryRegisterAsync(CancellationToken ct)
 {
-    string registrationSecretName = RegistrationCredentialResolver.SecretNameFor(applicationId);
-    string? registrationCredential;
-    string? providerError = null;
-
-    try
+    if (!Uri.TryCreate(operationsUrl.TrimEnd('/') + "/", UriKind.Absolute, out Uri? baseUri))
     {
-        ISecretProvider provider = app.Services.GetRequiredService<ISecretProvider>();
-        registrationCredential = await provider.GetAsync(registrationSecretName, ct).ConfigureAwait(false);
-    }
-    catch (OperationCanceledException) when (ct.IsCancellationRequested)
-    {
-        throw;
-    }
-    catch (Exception exception)
-    {
-        registrationCredential = null;
-        providerError = exception.Message;
-    }
-
-    lock (stateGate)
-    {
-        lastCredentialSource = string.IsNullOrWhiteSpace(registrationCredential)
-            ? RegistrationCredentialSource.Missing
-            : RegistrationCredentialSource.SecretProvider;
-        lastCredentialProviderError = providerError;
-    }
-
-    if (string.IsNullOrWhiteSpace(registrationCredential))
-    {
-        string detail = providerError is null
-            ? $"Common.Secrets did not resolve required secret '{registrationSecretName}'."
-            : $"Common.Secrets could not resolve required secret '{registrationSecretName}': {providerError}";
-        var failure = RegistrationResult.Failure(detail);
+        var failure = new ApplicationRegistrationStatus(
+            ApplicationRegistrationState.Unavailable,
+            DateTimeOffset.UtcNow,
+            "Operations URL is invalid.");
         lock (stateGate)
             lastRegistration = failure;
         return failure;
     }
-
-    if (!Uri.TryCreate(configurationUrl.TrimEnd('/') + "/", UriKind.Absolute, out Uri? baseUri))
-    {
-        var failure = RegistrationResult.Failure("Configuration URL is invalid.");
-        lock (stateGate)
-            lastRegistration = failure;
-        return failure;
-    }
-
-    var registrar = new ConfigurationRegistrar(
-        app.Services.GetRequiredService<IHttpClientFactory>().CreateClient("configuration"),
-        new RegistrationOptions(baseUri, registrationCredential, TimeSpan.FromSeconds(10)));
 
     JsonObject contract = await BuildContractAsync(ct);
-    RegistrationResult result = await registrar.RegisterContractAsync(contract, ct);
+    var registration = new ApplicationRegistrationClient(
+        app.Services.GetRequiredService<IHttpClientFactory>().CreateClient("operations"),
+        new ApplicationRegistrationOptions(
+            baseUri,
+            applicationId,
+            hostName,
+            RegistrationCredentialResolver.EnvironmentVariableName,
+            TimeSpan.FromSeconds(10)));
+
+    ApplicationRegistrationStatus result = await registration.RegisterAsync(contract, ct);
     lock (stateGate)
         lastRegistration = result;
     return result;
@@ -175,14 +143,10 @@ app.MapAegisHealth(applicationId);
 
 app.MapGet("/", () =>
 {
-    RegistrationResult? registration;
-    RegistrationCredentialSource credentialSource;
-    string? credentialProviderError;
+    ApplicationRegistrationStatus? registration;
     lock (stateGate)
     {
         registration = lastRegistration;
-        credentialSource = lastCredentialSource;
-        credentialProviderError = lastCredentialProviderError;
     }
 
     return Results.Ok(new
@@ -193,16 +157,15 @@ app.MapGet("/", () =>
         environment = environmentName,
         host = hostName,
         requiredMessageConfigured = !string.IsNullOrWhiteSpace(builder.Configuration["Hello:RequiredMessage"]),
-        registrationCredentialSource = credentialSource.ToString(),
-        registrationCredentialProviderError = credentialProviderError,
+        registrationEnvironmentVariable = RegistrationCredentialResolver.EnvironmentVariableName,
         registration
     });
 });
 
 app.MapPost("/register", async (CancellationToken ct) =>
 {
-    RegistrationResult result = await TryRegisterAsync(ct);
-    return result.Succeeded
+    ApplicationRegistrationStatus result = await TryRegisterAsync(ct);
+    return result.IsRegistered
         ? Results.Ok(result)
         : Results.Json(result, statusCode: StatusCodes.Status503ServiceUnavailable);
 });
@@ -278,7 +241,7 @@ app.Lifetime.ApplicationStarted.Register(() =>
         CancellationToken stopping = app.Lifetime.ApplicationStopping;
         while (!stopping.IsCancellationRequested)
         {
-            RegistrationResult result;
+            ApplicationRegistrationStatus result;
             try
             {
                 result = await TryRegisterAsync(stopping);
@@ -288,7 +251,7 @@ app.Lifetime.ApplicationStarted.Register(() =>
                 return;
             }
 
-            if (result.Succeeded)
+            if (result.IsRegistered)
                 return;
 
             try
