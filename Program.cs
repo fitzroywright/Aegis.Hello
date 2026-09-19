@@ -248,22 +248,22 @@ a{color:#72c4ff}@media(max-width:720px){.grid,.facts{grid-template-columns:1fr}.
 <h1>Aegis Hello</h1><p class="muted">Registration reference implementation and service status</p>
 <div class="grid">
 <section class="panel"><h2>Identity</h2><div class="facts">
-<div class="fact"><small>APPLICATION</small><b>{{E(applicationId)}}</b></div>
-<div class="fact"><small>INSTANCE</small><b>{{E(instanceId)}}</b></div>
-<div class="fact"><small>INSTALLATION ID</small><b>{{E(registration?.Identity.InstallationId)}}</b></div>
-<div class="fact"><small>VERSION</small><b>{{E(version)}}</b></div>
-<div class="fact"><small>HOST</small><b>{{E(hostName)}}</b></div>
-<div class="fact"><small>ENVIRONMENT</small><b>{{E(environmentName)}}</b></div>
+<div class="fact"><small>APPLICATION</small><b>{{{E(applicationId)}}}</b></div>
+<div class="fact"><small>INSTANCE</small><b>{{{E(instanceId)}}}</b></div>
+<div class="fact"><small>INSTALLATION ID</small><b>{{{E(registration?.Identity.InstallationId)}}}</b></div>
+<div class="fact"><small>VERSION</small><b>{{{E(version)}}}</b></div>
+<div class="fact"><small>HOST</small><b>{{{E(hostName)}}}</b></div>
+<div class="fact"><small>ENVIRONMENT</small><b>{{{E(environmentName)}}}</b></div>
 </div></section>
-<section class="panel"><h2>Registration</h2><p><span class="badge {{stateClass}}">{{E(state)}}</span></p>
-<div class="facts"><div class="fact"><small>REGISTRATION ID</small><b>{{E(registration?.RegistrationId)}}</b></div>
-<div class="fact"><small>LAST OBSERVED</small><b>{{E(registration?.ObservedAtUtc.ToString("u"))}}</b></div></div>{{error}}</section>
+<section class="panel"><h2>Registration</h2><p><span class="badge {{{stateClass}}}">{{{E(state)}}}</span></p>
+<div class="facts"><div class="fact"><small>REGISTRATION ID</small><b>{{{E(registration?.RegistrationId)}}}</b></div>
+<div class="fact"><small>LAST OBSERVED</small><b>{{{E(registration?.ObservedAtUtc.ToString("u"))}}}</b></div></div>{{{error}}}</section>
 </div>
 <section class="panel"><h2>Connectivity</h2><div class="facts">
-<div class="fact"><small>CONFIGURATION</small><b>{{E(configurationUrl)}}</b></div>
-<div class="fact"><small>DIAGNOSTICS</small><b>{{E(diagnosticsUrl)}}</b></div>
+<div class="fact"><small>CONFIGURATION</small><b>{{{E(configurationUrl)}}}</b></div>
+<div class="fact"><small>DIAGNOSTICS</small><b>{{{E(diagnosticsUrl)}}}</b></div>
 </div></section>
-<section class="panel"><h2>Lifecycle timeline</h2>{{eventRows}}</section>
+<section class="panel"><h2>Lifecycle timeline</h2>{{{eventRows}}}</section>
 <p class="muted">Machine-readable status: <a href="/status.json">/status.json</a>. No credentials or claim tokens are exposed.</p>
 </main></body></html>
 """;
