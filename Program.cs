@@ -230,7 +230,7 @@ app.MapGet("/", () =>
         ? string.Empty
         : $"<div class='error'><b>Registration detail</b><span>{E(registration.Error)}</span></div>";
 
-    string html = $$"""
+    string html = """
 <!doctype html>
 <html>
 <head>
@@ -248,25 +248,39 @@ a{color:#72c4ff}@media(max-width:720px){.grid,.facts{grid-template-columns:1fr}.
 <h1>Aegis Hello</h1><p class="muted">Registration reference implementation and service status</p>
 <div class="grid">
 <section class="panel"><h2>Identity</h2><div class="facts">
-<div class="fact"><small>APPLICATION</small><b>{{{E(applicationId)}}}</b></div>
-<div class="fact"><small>INSTANCE</small><b>{{{E(instanceId)}}}</b></div>
-<div class="fact"><small>INSTALLATION ID</small><b>{{{E(registration?.Identity.InstallationId)}}}</b></div>
-<div class="fact"><small>VERSION</small><b>{{{E(version)}}}</b></div>
-<div class="fact"><small>HOST</small><b>{{{E(hostName)}}}</b></div>
-<div class="fact"><small>ENVIRONMENT</small><b>{{{E(environmentName)}}}</b></div>
+<div class="fact"><small>APPLICATION</small><b>__APPLICATION__</b></div>
+<div class="fact"><small>INSTANCE</small><b>__INSTANCE__</b></div>
+<div class="fact"><small>INSTALLATION ID</small><b>__INSTALLATION__</b></div>
+<div class="fact"><small>VERSION</small><b>__VERSION__</b></div>
+<div class="fact"><small>HOST</small><b>__HOST__</b></div>
+<div class="fact"><small>ENVIRONMENT</small><b>__ENVIRONMENT__</b></div>
 </div></section>
-<section class="panel"><h2>Registration</h2><p><span class="badge {{{stateClass}}}">{{{E(state)}}}</span></p>
-<div class="facts"><div class="fact"><small>REGISTRATION ID</small><b>{{{E(registration?.RegistrationId)}}}</b></div>
-<div class="fact"><small>LAST OBSERVED</small><b>{{{E(registration?.ObservedAtUtc.ToString("u"))}}}</b></div></div>{{{error}}}</section>
+<section class="panel"><h2>Registration</h2><p><span class="badge __STATE_CLASS__">__STATE__</span></p>
+<div class="facts"><div class="fact"><small>REGISTRATION ID</small><b>__REGISTRATION_ID__</b></div>
+<div class="fact"><small>LAST OBSERVED</small><b>__LAST_OBSERVED__</b></div></div>__ERROR__</section>
 </div>
 <section class="panel"><h2>Connectivity</h2><div class="facts">
-<div class="fact"><small>CONFIGURATION</small><b>{{{E(configurationUrl)}}}</b></div>
-<div class="fact"><small>DIAGNOSTICS</small><b>{{{E(diagnosticsUrl)}}}</b></div>
+<div class="fact"><small>CONFIGURATION</small><b>__CONFIGURATION_URL__</b></div>
+<div class="fact"><small>DIAGNOSTICS</small><b>__DIAGNOSTICS_URL__</b></div>
 </div></section>
-<section class="panel"><h2>Lifecycle timeline</h2>{{{eventRows}}}</section>
+<section class="panel"><h2>Lifecycle timeline</h2>__EVENT_ROWS__</section>
 <p class="muted">Machine-readable status: <a href="/status.json">/status.json</a>. No credentials or claim tokens are exposed.</p>
 </main></body></html>
-""";
+"""
+        .Replace("__APPLICATION__", E(applicationId), StringComparison.Ordinal)
+        .Replace("__INSTANCE__", E(instanceId), StringComparison.Ordinal)
+        .Replace("__INSTALLATION__", E(registration?.Identity.InstallationId), StringComparison.Ordinal)
+        .Replace("__VERSION__", E(version), StringComparison.Ordinal)
+        .Replace("__HOST__", E(hostName), StringComparison.Ordinal)
+        .Replace("__ENVIRONMENT__", E(environmentName), StringComparison.Ordinal)
+        .Replace("__STATE_CLASS__", stateClass, StringComparison.Ordinal)
+        .Replace("__STATE__", E(state), StringComparison.Ordinal)
+        .Replace("__REGISTRATION_ID__", E(registration?.RegistrationId), StringComparison.Ordinal)
+        .Replace("__LAST_OBSERVED__", E(registration?.ObservedAtUtc.ToString("u")), StringComparison.Ordinal)
+        .Replace("__ERROR__", error, StringComparison.Ordinal)
+        .Replace("__CONFIGURATION_URL__", E(configurationUrl), StringComparison.Ordinal)
+        .Replace("__DIAGNOSTICS_URL__", E(diagnosticsUrl), StringComparison.Ordinal)
+        .Replace("__EVENT_ROWS__", eventRows, StringComparison.Ordinal);
 
     return Results.Content(html, "text/html; charset=utf-8");
 });
