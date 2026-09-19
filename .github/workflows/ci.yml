@@ -49,7 +49,11 @@ jobs:
           code=${PIPESTATUS[0]}
           exit "$code"
 
-      - name: Build
+      - name: Build Debug
+        shell: bash
+        run: dotnet build Aegis.Hello.csproj --no-restore --configuration Debug -p:CommonRoot="${{ github.workspace }}/Common"
+
+      - name: Build Release
         id: build
         shell: bash
         run: |
