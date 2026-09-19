@@ -224,7 +224,7 @@ app.MapGet("/", () =>
     string eventRows = events.Length == 0
         ? "<div class='empty'>No lifecycle events recorded yet.</div>"
         : string.Join("", events.Select(x =>
-            $"<div class='event'><time>{x.AtUtc:HH:mm:ss}</time><span>{E(x.Message)}</span><code>{E(x.CorrelationId)}</code></div>"));
+            $"<div class='event'><time class='local-datetime' datetime='{E(x.AtUtc.ToString("O"))}'>{E(x.AtUtc.ToString("u"))}</time><span>{E(x.Message)}</span><code>{E(x.CorrelationId)}</code></div>"));
 
     string error = string.IsNullOrWhiteSpace(registration?.Error)
         ? string.Empty
@@ -257,7 +257,7 @@ a{color:#72c4ff}@media(max-width:720px){.grid,.facts{grid-template-columns:1fr}.
 </div></section>
 <section class="panel"><h2>Registration</h2><p><span class="badge __STATE_CLASS__">__STATE__</span></p>
 <div class="facts"><div class="fact"><small>REGISTRATION ID</small><b>__REGISTRATION_ID__</b></div>
-<div class="fact"><small>LAST OBSERVED</small><b>__LAST_OBSERVED__</b></div></div>__ERROR__</section>
+<div class="fact"><small>LAST OBSERVED</small><b id="lastObserved" data-utc="__LAST_OBSERVED_ISO__">__LAST_OBSERVED__</b></div></div>__ERROR__</section>
 </div>
 <section class="panel"><h2>Connectivity</h2><div class="facts">
 <div class="fact"><small>CONFIGURATION</small><b>__CONFIGURATION_URL__</b></div>
@@ -265,6 +265,12 @@ a{color:#72c4ff}@media(max-width:720px){.grid,.facts{grid-template-columns:1fr}.
 </div></section>
 <section class="panel"><h2>Lifecycle timeline</h2>__EVENT_ROWS__</section>
 <p class="muted">Machine-readable status: <a href="/status.json">/status.json</a>. No credentials or claim tokens are exposed.</p>
+<script>
+const localDateTime=v=>{const d=new Date(v);return Number.isNaN(d.getTime())?String(v??'—'):d.toLocaleString(undefined,{dateStyle:'medium',timeStyle:'medium'});};
+const localZone=()=>Intl.DateTimeFormat().resolvedOptions().timeZone;
+document.querySelectorAll('time.local-datetime[datetime]').forEach(x=>{x.textContent=localDateTime(x.getAttribute('datetime'));x.title=localZone();});
+const observed=document.getElementById('lastObserved');if(observed?.dataset.utc){observed.textContent=localDateTime(observed.dataset.utc)+' · '+localZone();}
+</script>
 </main></body></html>
 """
         .Replace("__APPLICATION__", E(applicationId), StringComparison.Ordinal)
@@ -277,6 +283,7 @@ a{color:#72c4ff}@media(max-width:720px){.grid,.facts{grid-template-columns:1fr}.
         .Replace("__STATE__", E(state), StringComparison.Ordinal)
         .Replace("__REGISTRATION_ID__", E(registration?.RegistrationId), StringComparison.Ordinal)
         .Replace("__LAST_OBSERVED__", E(registration?.ObservedAtUtc.ToString("u")), StringComparison.Ordinal)
+        .Replace("__LAST_OBSERVED_ISO__", E(registration?.ObservedAtUtc.ToString("O")), StringComparison.Ordinal)
         .Replace("__ERROR__", error, StringComparison.Ordinal)
         .Replace("__CONFIGURATION_URL__", E(configurationUrl), StringComparison.Ordinal)
         .Replace("__DIAGNOSTICS_URL__", E(diagnosticsUrl), StringComparison.Ordinal)
