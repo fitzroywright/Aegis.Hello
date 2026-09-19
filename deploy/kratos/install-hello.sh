@@ -53,6 +53,7 @@ fi
 sed -i '/^AEGIS_REGISTRATION_KEY=/d' "$HELLO_ENV"
 sed -i '/^AEGIS_CONFIGURATION_REGISTRATION_KEY=/d' "$HELLO_ENV"
 sed -i '/^AegisConfiguration__RegistrationKey=/d' "$HELLO_ENV"
+sed -i '/^Aegis__Registration__Key=/d' "$HELLO_ENV"
 chown aegis:aegis "$HELLO_ENV"
 chmod 0600 "$HELLO_ENV"
 
