@@ -37,6 +37,10 @@ systemctl stop aegis-hello.service 2>/dev/null || true
 rsync -a --delete "$SOURCE_DIR/" "$INSTALL_DIR/"
 chown -R aegis:aegis "$INSTALL_DIR"
 
+if [[ -d "$INSTALL_DIR/scripts" ]]; then
+  find "$INSTALL_DIR/scripts" -maxdepth 1 -type f \( -name '*.sh' -o -name 'aegis-hello' \) -exec chmod 0755 {} +
+fi
+
 if [[ ! -f "$HELLO_ENV" ]]; then
   cat > "$HELLO_ENV" <<'EOF'
 # Aegis.Hello deployment overrides.
