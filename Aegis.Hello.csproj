@@ -11,4 +11,8 @@
     <ProjectReference Include="$(CommonRoot)\Common.Registration\Common.Registration.csproj" AdditionalProperties="Configuration=$(Configuration)" />
     <ProjectReference Include="$(CommonRoot)\Common.Secrets\Common.Secrets.csproj" AdditionalProperties="Configuration=$(Configuration)" />
   </ItemGroup>
+  <ItemGroup>
+    <None Update="scripts\**\*" CopyToPublishDirectory="PreserveNewest" />
+    <None Update="deploy\**\*" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
 </Project>
