@@ -65,6 +65,7 @@ async Task<JsonObject> BuildContractAsync(CancellationToken ct)
         ["displayName"] = "Aegis Hello",
         ["version"] = version,
         ["description"] = "Permanent registration and diagnostics contract test application.",
+        ["runbookReference"] = "docs/RUNBOOK.md",
         ["siteId"] = builder.Configuration["Site:Id"],
         ["instanceId"] = instanceId,
         ["runtimeEnvironment"] = new JsonObject
@@ -165,7 +166,8 @@ RegistrationLifecycleClient CreateRegistrationClient()
             applicationId,
             instanceId,
             identityFile,
-            TimeSpan.FromSeconds(10)),
+            TimeSpan.FromSeconds(10),
+            RunbookReference: "docs/RUNBOOK.md"),
         logger: app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("Aegis.Hello.Registration"));
 }
 
