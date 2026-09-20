@@ -24,6 +24,10 @@ string diagnosticsUrl = AegisControlPlaneEndpoints.ResolvePublic(
 
 builder.Services.AddHttpClient("configuration-registration");
 builder.Services.AddHttpClient("diagnostics");
+builder.Services.AddHttpClient("operations-lifecycle");
+builder.Services.AddSingleton<HelloLifecycleEventSink>();
+builder.Services.AddSingleton<ILifecycleEventSink>(sp => sp.GetRequiredService<HelloLifecycleEventSink>());
+builder.Services.AddSingleton<LifecycleTelemetry>();
 builder.Services.AddCommonSecrets(builder.Configuration);
 string operationsLogInstanceId = builder.Configuration["Aegis:Registration:InstanceId"]?.Trim()
     ?? builder.Environment.EnvironmentName;
@@ -203,7 +207,31 @@ async Task<RegistrationLifecycleStatus> RegistrationStepAsync(CancellationToken 
 {
     JsonObject metadata = await BuildMetadataAsync(ct);
     RegistrationLifecycleClient registration = CreateRegistrationClient();
-    RegistrationLifecycleStatus result = await registration.StepAsync(metadata, ct);
+    LifecycleTelemetry lifecycle = app.Services.GetRequiredService<LifecycleTelemetry>();
+    string stepCorrelation = Guid.NewGuid().ToString("N");
+    await lifecycle.EmitAsync(LifecycleEvent.Create(
+        applicationId, instanceId, "Registration", "Step",
+        LifecycleEventOutcome.Started, stepCorrelation), ct);
+    RegistrationLifecycleStatus result;
+    try
+    {
+        result = await registration.StepAsync(metadata, ct);
+    }
+    catch (Exception ex)
+    {
+        await lifecycle.EmitAsync(LifecycleEvent.Create(
+            applicationId, instanceId, "Registration", "Step",
+            LifecycleEventOutcome.Failed, stepCorrelation,
+            code: ex.GetType().Name,
+            detail: "Registration lifecycle step failed."), ct);
+        throw;
+    }
+    await lifecycle.EmitAsync(LifecycleEvent.Create(
+        applicationId, instanceId, "Registration", result.State.ToString(),
+        result.IsRegistered ? LifecycleEventOutcome.Succeeded : LifecycleEventOutcome.Warning,
+        result.CorrelationId ?? stepCorrelation,
+        relatedBusinessId: result.RegistrationId,
+        code: result.StatusCode?.ToString()), ct);
 
     if (result.IsRegistered)
     {
