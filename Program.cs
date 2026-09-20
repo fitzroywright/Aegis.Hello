@@ -8,10 +8,19 @@ using Common.Secrets;
 
 var builder = WebApplication.CreateBuilder(args);
 
-string configurationUrl = builder.Configuration["Aegis:Configuration:Url"]
-    ?? "https://config.ffpja.org/";
-string diagnosticsUrl = builder.Configuration["Aegis:Diagnostics:Url"]
-    ?? string.Empty;
+using ILoggerFactory bootstrapLoggerFactory = LoggerFactory.Create(logging => logging.AddConsole());
+ILogger endpointLogger = bootstrapLoggerFactory.CreateLogger("Aegis.Hello.ControlPlane");
+
+string configurationUrl = AegisControlPlaneEndpoints.ResolvePublic(
+    builder.Configuration,
+    AegisControlPlaneService.Configuration,
+    endpointLogger,
+    configurationKey: "Aegis:Configuration:Url");
+string diagnosticsUrl = AegisControlPlaneEndpoints.ResolvePublic(
+    builder.Configuration,
+    AegisControlPlaneService.Diagnostics,
+    endpointLogger,
+    configurationKey: "Aegis:Diagnostics:Url");
 
 builder.Services.AddHttpClient("configuration-registration");
 builder.Services.AddHttpClient("diagnostics");
@@ -455,8 +464,11 @@ internal sealed class HelloOperationsTelemetryPublisher(
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        string operationsUrl = configuration["Aegis:Operations:Url"]?.Trim()
-            ?? "https://operations.ffpja.org";
+        string operationsUrl = AegisControlPlaneEndpoints.ResolvePublic(
+            configuration,
+            AegisControlPlaneService.Operations,
+            logger,
+            configurationKey: "Aegis:Operations:Url");
         string instanceId = configuration["Aegis:Registration:InstanceId"]?.Trim()
             ?? environment.EnvironmentName;
         string identityFile = configuration["Aegis:Registration:IdentityFile"]?.Trim()
@@ -497,7 +509,10 @@ internal sealed class HelloOperationsTelemetryPublisher(
                             configurationStatus = "Published",
                             dependencies = new[]
                             {
-                                configuration["Aegis:Configuration:Url"] ?? "https://config.ffpja.org/"
+                                AegisControlPlaneEndpoints.ResolvePublic(
+                                    configuration,
+                                    AegisControlPlaneService.Configuration,
+                                    configurationKey: "Aegis:Configuration:Url")
                             },
                             reason = "Hello process heartbeat is current and its durable registration credential is valid."
                         })
