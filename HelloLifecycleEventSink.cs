@@ -42,3 +42,4 @@ public sealed class HelloLifecycleEventSink(
         catch (Exception ex) { logger.LogDebug(ex, "Lifecycle telemetry publication failed; application lifecycle continues."); }
     }
 }
+
