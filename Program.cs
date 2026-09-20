@@ -72,6 +72,12 @@ async Task<JsonObject> BuildContractAsync(CancellationToken ct)
         ["displayName"] = "Aegis Hello",
         ["version"] = version,
         ["description"] = "Permanent registration and diagnostics contract test application.",
+        ["presentation"] = new JsonObject
+        {
+            ["iconUrl"] = builder.Configuration["Aegis:Presentation:IconUrl"],
+            ["shortName"] = "Hello",
+            ["accent"] = builder.Configuration["Aegis:Presentation:Accent"] ?? "gold"
+        },
         ["runbookReference"] = "docs/RUNBOOK.md",
         ["siteId"] = builder.Configuration["Site:Id"],
         ["instanceId"] = instanceId,
@@ -149,6 +155,12 @@ async Task<JsonObject> BuildMetadataAsync(CancellationToken ct)
     return new JsonObject
     {
         ["displayName"] = "Aegis Hello",
+        ["presentation"] = new JsonObject
+        {
+            ["iconUrl"] = builder.Configuration["Aegis:Presentation:IconUrl"],
+            ["shortName"] = "Hello",
+            ["accent"] = builder.Configuration["Aegis:Presentation:Accent"] ?? "gold"
+        },
         ["applicationVersion"] = version,
         ["environment"] = environmentName,
         ["hostname"] = hostName,
