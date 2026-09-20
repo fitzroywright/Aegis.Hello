@@ -23,6 +23,7 @@ string operationsLogIdentityFile = builder.Configuration["Aegis:Registration:Ide
         ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "Aegis", "Hello", "registration-identity.json")
         : "/var/lib/aegis/hello/registration-identity.json");
 builder.Services.AddAegisOperationsLogging(builder.Configuration, "Aegis.Hello", operationsLogInstanceId, operationsLogIdentityFile, builder.Environment.EnvironmentName);
+builder.Services.AddHostedService<HelloOperationsTelemetryPublisher>();
 
 var app = builder.Build();
 
@@ -443,3 +444,98 @@ app.Run();
 
 static string E(string? value) => HtmlEncoder.Default.Encode(value ?? "—");
 internal sealed record TimelineEvent(DateTimeOffset AtUtc, string Message, string? CorrelationId);
+
+internal sealed class HelloOperationsTelemetryPublisher(
+    IConfiguration configuration,
+    IHostEnvironment environment,
+    ILogger<HelloOperationsTelemetryPublisher> logger) : BackgroundService
+{
+    private const string ApplicationId = "Aegis.Hello";
+    private static readonly TimeSpan Interval = TimeSpan.FromSeconds(30);
+
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        string operationsUrl = configuration["Aegis:Operations:Url"]?.Trim()
+            ?? "https://operations.ffpja.org";
+        string instanceId = configuration["Aegis:Registration:InstanceId"]?.Trim()
+            ?? environment.EnvironmentName;
+        string identityFile = configuration["Aegis:Registration:IdentityFile"]?.Trim()
+            ?? (OperatingSystem.IsWindows()
+                ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "Aegis", "Hello", "registration-identity.json")
+                : "/var/lib/aegis/hello/registration-identity.json");
+
+        var identityStore = new FileRegistrationIdentityStore(identityFile);
+
+        while (!stoppingToken.IsCancellationRequested)
+        {
+            try
+            {
+                RegistrationIdentityDocument identity =
+                    await identityStore.LoadOrCreateAsync(ApplicationId, instanceId, stoppingToken);
+
+                if (string.IsNullOrWhiteSpace(identity.Credential))
+                {
+                    logger.LogDebug("Hello operational telemetry is waiting for a durable registration credential.");
+                }
+                else
+                {
+                    using HttpClient client = new() { Timeout = TimeSpan.FromSeconds(10) };
+                    using var request = new HttpRequestMessage(
+                        HttpMethod.Post,
+                        operationsUrl.TrimEnd('/') + "/api/operations/applications/observe")
+                    {
+                        Content = System.Net.Http.Json.JsonContent.Create(new
+                        {
+                            applicationId = ApplicationId,
+                            displayName = "Aegis Hello",
+                            instanceId,
+                            environment = environment.EnvironmentName,
+                            version = Assembly.GetEntryAssembly()?.GetName().Version?.ToString() ?? "unknown",
+                            registrationStatus = "Registered",
+                            state = "Healthy",
+                            observedAtUtc = DateTimeOffset.UtcNow,
+                            configurationStatus = "Published",
+                            dependencies = new[]
+                            {
+                                configuration["Aegis:Configuration:Url"] ?? "https://config.ffpja.org/"
+                            },
+                            reason = "Hello process heartbeat is current and its durable registration credential is valid."
+                        })
+                    };
+
+                    request.Headers.Authorization =
+                        new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", identity.Credential);
+                    request.Headers.TryAddWithoutValidation("X-Aegis-Application-Id", identity.ApplicationId);
+                    request.Headers.TryAddWithoutValidation("X-Aegis-Instance-Id", identity.InstanceId);
+                    request.Headers.TryAddWithoutValidation("X-Aegis-Installation-Id", identity.InstallationId);
+                    request.Headers.TryAddWithoutValidation("X-Aegis-Correlation-Id", Guid.NewGuid().ToString("N"));
+
+                    using HttpResponseMessage response = await client.SendAsync(request, stoppingToken);
+                    if (!response.IsSuccessStatusCode)
+                    {
+                        logger.LogWarning(
+                            "Hello operational heartbeat returned HTTP {StatusCode}.",
+                            (int)response.StatusCode);
+                    }
+                    else
+                    {
+                        logger.LogDebug(
+                            "Hello operational heartbeat published as Healthy for instance {InstanceId}.",
+                            instanceId);
+                    }
+                }
+            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                return;
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Hello operational heartbeat publication failed.");
+            }
+
+            try { await Task.Delay(Interval, stoppingToken); }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { return; }
+        }
+    }
+}
