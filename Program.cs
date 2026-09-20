@@ -11,7 +11,6 @@ var builder = WebApplication.CreateBuilder(args);
 string configurationUrl = builder.Configuration["Aegis:Configuration:Url"]
     ?? "https://config.ffpja.org/";
 string diagnosticsUrl = builder.Configuration["Aegis:Diagnostics:Url"]
-    ?? builder.Configuration["Aegis:DiagnosticsUrl"]
     ?? string.Empty;
 
 builder.Services.AddHttpClient("configuration-registration");
