@@ -17,6 +17,13 @@ string diagnosticsUrl = builder.Configuration["Aegis:Diagnostics:Url"]
 builder.Services.AddHttpClient("configuration-registration");
 builder.Services.AddHttpClient("diagnostics");
 builder.Services.AddCommonSecrets(builder.Configuration);
+string operationsLogInstanceId = builder.Configuration["Aegis:Registration:InstanceId"]?.Trim()
+    ?? builder.Environment.EnvironmentName;
+string operationsLogIdentityFile = builder.Configuration["Aegis:Registration:IdentityFile"]?.Trim()
+    ?? (OperatingSystem.IsWindows()
+        ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "Aegis", "Hello", "registration-identity.json")
+        : "/var/lib/aegis/hello/registration-identity.json");
+builder.Services.AddAegisOperationsLogging(builder.Configuration, "Aegis.Hello", operationsLogInstanceId, operationsLogIdentityFile, builder.Environment.EnvironmentName);
 
 var app = builder.Build();
 
