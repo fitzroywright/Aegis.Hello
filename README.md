@@ -1,30 +1,55 @@
 # Aegis.Hello
 
-Aegis.Hello is the minimal reference implementation for integrating an Aegis application correctly.
+Reference application for proving the Aegis control-plane contracts on a real deployed workload.
 
-## Reference lifecycle
+## Common.Secrets reference configuration
 
-The expected order is:
+Hello is the reference consumer for the provider-instance Common.Secrets contract.
 
-1. Load configuration.
-2. Initialize Common.Secrets.
-3. Start the application.
-4. Load/create the durable Common.Registration identity.
-5. Reconcile registration with Aegis.Configuration.
-6. If Registered, publish the configuration contract.
-7. Expose Common.Diagnostics health and safe lifecycle status.
-8. Retry central-control-plane operations without making application availability depend on them.
+Production configuration uses a named provider instance:
 
-Normal restarts reuse the same durable identity and **must not create a new pending registration**.
+```json
+{
+  "CommonSecrets": {
+    "Mode": "Production",
+    "ProviderOrder": [ "PrimarySecrets" ],
+    "Providers": {
+      "PrimarySecrets": {
+        "Type": "OpenBao",
+        "Settings": {
+          "Enabled": true,
+          "Address": "https://openbao.ffpja.org",
+          "MountPath": "secret",
+          "BasePath": "aegis/hello",
+          "RequireHttps": true,
+          "SecretIdEnvironmentVariable": "AEGIS_HELLO_OPENBAO_SECRET_ID"
+        }
+      }
+    }
+  }
+}
+```
 
-## Registration acceptance
+The provider instance name (`PrimarySecrets`) is application/deployment vocabulary.
+`ProviderOrder` references that name. Common.Secrets dispatches the provider by its
+`Type`; only the OpenBao implementation interprets the nested `Settings`.
 
-Use `scripts/acceptance-smoke.sh` for non-destructive checks.
+The Secret Zero credential itself is not stored in appsettings. For this reference
+deployment the AppRole Secret ID is supplied externally through
+`AEGIS_HELLO_OPENBAO_SECRET_ID` (or a protected file if configured operationally).
 
-Use `scripts/acceptance-lifecycle-destructive.sh` only with explicit authorization. It verifies credential-loss recovery, identity conflict, revoke, purge, re-registration, final approval and InstallationId preservation.
+There is intentionally no legacy `CommonSecrets:OpenBao` fallback.
 
-The production gate combines smoke, reconciliation, database restore verification, optional destructive lifecycle testing and a runtime secret-leakage scan.
+## Public URL
 
-## Operational documentation
+`Aegis:PublicUrl` is the human/browser-facing URL for Hello. It is appropriate here
+because Hello exposes a public endpoint. Applications without a public/browser endpoint
+do not need to declare it.
 
-See `docs/RUNBOOK.md`.
+## Build
+
+```powershell
+dotnet restore
+dotnet build
+dotnet test
+```
