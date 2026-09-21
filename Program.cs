@@ -11,18 +11,21 @@ var builder = WebApplication.CreateBuilder(args);
 using ILoggerFactory bootstrapLoggerFactory = LoggerFactory.Create(logging => logging.AddConsole());
 ILogger endpointLogger = bootstrapLoggerFactory.CreateLogger("Aegis.Hello.ControlPlane");
 
-string configurationUrl = AegisControlPlaneEndpoints.ResolveInternal(
+string configurationUrl = AegisControlPlaneEndpoints.ResolvePublic(
     builder.Configuration,
     AegisControlPlaneService.Configuration,
-    endpointLogger);
-string diagnosticsUrl = AegisControlPlaneEndpoints.ResolveInternal(
+    endpointLogger,
+    configurationKey: "Aegis:Configuration:Url");
+string diagnosticsUrl = AegisControlPlaneEndpoints.ResolvePublic(
     builder.Configuration,
     AegisControlPlaneService.Diagnostics,
-    endpointLogger);
-string operationsUrl = AegisControlPlaneEndpoints.ResolveInternal(
+    endpointLogger,
+    configurationKey: "Aegis:Diagnostics:Url");
+string operationsUrl = AegisControlPlaneEndpoints.ResolvePublic(
     builder.Configuration,
     AegisControlPlaneService.Operations,
-    endpointLogger);
+    endpointLogger,
+    configurationKey: "Aegis:Operations:Url");
 
 builder.Services.AddHttpClient("configuration-registration");
 builder.Services.AddHttpClient("diagnostics");
@@ -530,10 +533,11 @@ internal sealed class HelloOperationsTelemetryPublisher(
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        string operationsUrl = AegisControlPlaneEndpoints.ResolveInternal(
+        string operationsUrl = AegisControlPlaneEndpoints.ResolvePublic(
             configuration,
             AegisControlPlaneService.Operations,
-            logger);
+            logger,
+            configurationKey: "Aegis:Operations:Url");
         string instanceId = configuration["Aegis:Registration:InstanceId"]?.Trim()
             ?? environment.EnvironmentName;
         string identityFile = configuration["Aegis:Registration:IdentityFile"]?.Trim()
@@ -574,9 +578,10 @@ internal sealed class HelloOperationsTelemetryPublisher(
                             configurationStatus = "Published",
                             dependencies = new[]
                             {
-                                AegisControlPlaneEndpoints.ResolveInternal(
+                                AegisControlPlaneEndpoints.ResolvePublic(
                                     configuration,
-                                    AegisControlPlaneService.Configuration)
+                                    AegisControlPlaneService.Configuration,
+                                    configurationKey: "Aegis:Configuration:Url")
                             },
                             reason = "Hello process heartbeat is current and its durable registration credential is valid."
                         })
