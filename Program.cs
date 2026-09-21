@@ -229,7 +229,10 @@ RegistrationLifecycleClient CreateRegistrationClient()
             applicationId,
             instanceId,
             identityFile,
-            TimeSpan.FromSeconds(10),
+            TimeSpan.FromSeconds(Math.Clamp(
+                builder.Configuration.GetValue("Aegis:Registration:RequestTimeoutSeconds", 30),
+                5,
+                120)),
             RunbookReference: "docs/RUNBOOK.md"),
         logger: app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("Aegis.Hello.Registration"),
         lifecycleEventSink: CreateLifecycleSink());
@@ -560,7 +563,11 @@ internal sealed class HelloOperationsTelemetryPublisher(
                 }
                 else
                 {
-                    using HttpClient client = new() { Timeout = TimeSpan.FromSeconds(10) };
+                    int telemetryTimeoutSeconds = Math.Clamp(
+                        configuration.GetValue("Aegis:Operations:TelemetryTimeoutSeconds", 20),
+                        5,
+                        120);
+                    using HttpClient client = new() { Timeout = TimeSpan.FromSeconds(telemetryTimeoutSeconds) };
                     using var request = new HttpRequestMessage(
                         HttpMethod.Post,
                         operationsUrl.TrimEnd('/') + "/api/operations/applications/observe")
