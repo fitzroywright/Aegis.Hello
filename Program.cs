@@ -21,6 +21,11 @@ string diagnosticsUrl = AegisControlPlaneEndpoints.ResolvePublic(
     AegisControlPlaneService.Diagnostics,
     endpointLogger,
     configurationKey: "Aegis:Diagnostics:Url");
+string operationsUrl = AegisControlPlaneEndpoints.ResolvePublic(
+    builder.Configuration,
+    AegisControlPlaneService.Operations,
+    endpointLogger,
+    configurationKey: "Aegis:Operations:Url");
 
 builder.Services.AddHttpClient("configuration-registration");
 builder.Services.AddHttpClient("diagnostics");
@@ -182,6 +187,36 @@ async Task<JsonObject> BuildMetadataAsync(CancellationToken ct)
     };
 }
 
+ILifecycleEventSink CreateLifecycleSink()
+{
+    if (!Uri.TryCreate(
+            operationsUrl.TrimEnd('/') + "/api/operations/activity/observe",
+            UriKind.Absolute,
+            out Uri? activityEndpoint))
+        return new NullLifecycleEventSink();
+
+    var identityStore = new FileRegistrationIdentityStore(identityFile);
+    var client = new HttpClient();
+
+    return new HttpLifecycleEventSink(
+        client,
+        new HttpLifecycleEventSinkOptions(activityEndpoint, TimeSpan.FromSeconds(10)),
+        async (request, lifecycleEvent, ct) =>
+        {
+            RegistrationIdentityDocument identity =
+                await identityStore.LoadOrCreateAsync(applicationId, instanceId, ct);
+
+            if (string.IsNullOrWhiteSpace(identity.Credential))
+                return;
+
+            request.Headers.Authorization =
+                new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", identity.Credential);
+            request.Headers.TryAddWithoutValidation("X-Aegis-Application-Id", identity.ApplicationId);
+            request.Headers.TryAddWithoutValidation("X-Aegis-Instance-Id", identity.InstanceId);
+            request.Headers.TryAddWithoutValidation("X-Aegis-Installation-Id", identity.InstallationId);
+        });
+}
+
 RegistrationLifecycleClient CreateRegistrationClient()
 {
     if (!Uri.TryCreate(configurationUrl.TrimEnd('/') + "/", UriKind.Absolute, out Uri? baseUri))
@@ -196,14 +231,48 @@ RegistrationLifecycleClient CreateRegistrationClient()
             identityFile,
             TimeSpan.FromSeconds(10),
             RunbookReference: "docs/RUNBOOK.md"),
-        logger: app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("Aegis.Hello.Registration"));
+        logger: app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("Aegis.Hello.Registration"),
+        lifecycleEventSink: CreateLifecycleSink());
 }
 
 async Task<RegistrationLifecycleStatus> RegistrationStepAsync(CancellationToken ct)
 {
     JsonObject metadata = await BuildMetadataAsync(ct);
     RegistrationLifecycleClient registration = CreateRegistrationClient();
-    RegistrationLifecycleStatus result = await registration.StepAsync(metadata, ct);
+    RegistrationLifecycleStatus result;
+    try
+    {
+        result = await registration.StepAsync(metadata, ct);
+    }
+    catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+    {
+        string correlationId = Guid.NewGuid().ToString("N");
+        try
+        {
+            RegistrationIdentityDocument identity =
+                await new FileRegistrationIdentityStore(identityFile)
+                    .LoadOrCreateAsync(applicationId, instanceId, ct);
+
+            await CreateLifecycleSink().EmitAsync(
+                LifecycleEvent.Create(
+                    applicationId,
+                    instanceId,
+                    "Registration",
+                    "ConfigurationConnectivity",
+                    LifecycleEventOutcome.Failed,
+                    correlationId,
+                    relatedBusinessId: identity.RegistrationId,
+                    code: ex is TaskCanceledException ? "CONFIGURATION_TIMEOUT" : "CONFIGURATION_UNAVAILABLE",
+                    detail: ex.Message.Length <= 1024 ? ex.Message : ex.Message[..1024]),
+                ct);
+        }
+        catch (Exception telemetryEx) when (telemetryEx is not OperationCanceledException)
+        {
+            app.Logger.LogDebug(telemetryEx, "Unable to publish registration connectivity failure telemetry.");
+        }
+
+        throw;
+    }
 
     if (result.IsRegistered)
     {
