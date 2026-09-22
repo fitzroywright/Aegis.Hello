@@ -27,7 +27,13 @@ string operationsUrl = AegisControlPlaneEndpoints.ResolvePublic(
     endpointLogger,
     configurationKey: "Aegis:Operations:Url");
 
-builder.Services.AddHttpClient("configuration-registration");
+string runtimeSessionId = Guid.NewGuid().ToString("N");
+builder.Services.AddHttpClient("configuration-registration", client =>
+{
+    client.DefaultRequestHeaders.TryAddWithoutValidation(
+        "X-Aegis-Runtime-Session-Id",
+        runtimeSessionId);
+});
 builder.Services.AddHttpClient("diagnostics");
 builder.Services.AddCommonSecrets(builder.Configuration);
 string operationsLogInstanceId = builder.Configuration["Aegis:Registration:InstanceId"]?.Trim()
@@ -418,6 +424,7 @@ app.MapGet("/status.json", () =>
         host = hostName,
         instanceId,
         installationId = registration?.Identity.InstallationId,
+        runtimeSessionId,
         registration = registration is null ? null : new
         {
             state = registration.State.ToString(),
