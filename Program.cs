@@ -131,6 +131,7 @@ async Task<JsonObject> BuildContractAsync(CancellationToken ct)
                 ["required"] = true,
                 ["purpose"] = "Provides the network-reachable Hello endpoint that Diagnostics can discover and probe.",
                 ["configurationKey"] = "Aegis:PublicUrl",
+                ["safeDisplayValue"] = publicUrlConfigured ? publicUrl!.Trim() : null,
                 ["isConfigured"] = publicUrlConfigured,
                 ["configurationState"] = publicUrlConfigured ? "Configured" : "Missing"
             },
