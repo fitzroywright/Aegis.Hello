@@ -108,7 +108,7 @@ async Task<JsonObject> BuildContractAsync(CancellationToken ct)
         },
         ["diagnostics"] = new JsonObject
         {
-            ["baseUrlConfigurationKey"] = "Aegis:PublicUrl",
+            ["baseUrl"] = publicUrlConfigured ? publicUrl!.Trim() : null,
             ["healthPath"] = "/health",
             ["supportsRemoteDiagnostics"] = false,
             ["supportsOperationalTelemetry"] = true,
@@ -131,7 +131,7 @@ async Task<JsonObject> BuildContractAsync(CancellationToken ct)
                 ["required"] = true,
                 ["purpose"] = "Provides the network-reachable Hello endpoint that Diagnostics can discover and probe.",
                 ["configurationKey"] = "Aegis:PublicUrl",
-                ["safeDisplayValue"] = publicUrlConfigured ? publicUrl!.Trim() : null,
+                ["displayValue"] = publicUrlConfigured ? publicUrl!.Trim() : null,
                 ["isConfigured"] = publicUrlConfigured,
                 ["configurationState"] = publicUrlConfigured ? "Configured" : "Missing"
             },
