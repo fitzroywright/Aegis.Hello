@@ -286,20 +286,34 @@ async Task<RegistrationLifecycleStatus> RegistrationStepAsync(CancellationToken 
 
     if (result.IsRegistered)
     {
-        HttpStatusCode contractStatus = await registration.PublishConfigurationContractAsync(
-            await BuildContractAsync(ct),
-            ct);
-
+        bool publishContract;
         lock (stateGate)
         {
-            lastContractStatus = contractStatus;
-            lastContractAttemptAtUtc = DateTimeOffset.UtcNow;
+            publishContract =
+                !lastContractAttemptAtUtc.HasValue ||
+                DateTimeOffset.UtcNow - lastContractAttemptAtUtc.Value >= TimeSpan.FromMinutes(5) ||
+                lastContractStatus is null ||
+                (int)lastContractStatus.Value < 200 ||
+                (int)lastContractStatus.Value >= 300;
         }
 
-        if ((int)contractStatus is >= 200 and < 300)
-            Record("Configuration contract published", result.CorrelationId);
-        else
-            Record($"Configuration contract publication failed: HTTP {(int)contractStatus}", result.CorrelationId);
+        if (publishContract)
+        {
+            HttpStatusCode contractStatus = await registration.PublishConfigurationContractAsync(
+                await BuildContractAsync(ct),
+                ct);
+
+            lock (stateGate)
+            {
+                lastContractStatus = contractStatus;
+                lastContractAttemptAtUtc = DateTimeOffset.UtcNow;
+            }
+
+            if ((int)contractStatus is >= 200 and < 300)
+                Record("Configuration contract published", result.CorrelationId);
+            else
+                Record($"Configuration contract publication failed: HTTP {(int)contractStatus}", result.CorrelationId);
+        }
     }
 
     lock (stateGate)
@@ -507,7 +521,7 @@ app.Lifetime.ApplicationStarted.Register(() =>
                 RegistrationLifecycleStatus result = await RegistrationStepAsync(stopping);
                 TimeSpan delay = result.State switch
                 {
-                    RegistrationLifecycleState.Registered => TimeSpan.FromMinutes(5),
+                    RegistrationLifecycleState.Registered => TimeSpan.FromSeconds(30),
                     RegistrationLifecycleState.Pending or RegistrationLifecycleState.RecoveryPending => TimeSpan.FromSeconds(10),
                     RegistrationLifecycleState.IdentityConflict or RegistrationLifecycleState.Rejected => TimeSpan.FromMinutes(1),
                     _ => TimeSpan.FromSeconds(30)
