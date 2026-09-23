@@ -123,6 +123,8 @@ async Task<JsonObject> BuildContractAsync(CancellationToken ct)
     CommonSecretsHealth secretsHealth = await app.Services
         .GetRequiredService<ICommonSecretsHealthCheck>()
         .CheckAsync(ct);
+    string? diagnosticSecretName = builder.Configuration["Aegis:Diagnostics:RequestCredentialSecretName"]?.Trim();
+    bool remoteDiagnosticsConfigured = secretsHealth.IsAvailable && !string.IsNullOrWhiteSpace(diagnosticSecretName);
 
     return new JsonObject
     {
@@ -156,10 +158,10 @@ async Task<JsonObject> BuildContractAsync(CancellationToken ct)
             ["healthPath"] = "/health",
             ["diagnosticsRunPath"] = "/api/engineering/diagnostics/diagnostic-level/run",
             ["diagnosticsRunsPath"] = "/api/engineering/diagnostics/diagnostic-level/history",
-            ["supportsRemoteDiagnostics"] = true,
+            ["supportsRemoteDiagnostics"] = remoteDiagnosticsConfigured,
             ["supportsOperationalTelemetry"] = true,
             ["authenticationScheme"] = "DiagnosticLevel-HMAC-SHA256",
-            ["secretName"] = builder.Configuration["Aegis:Diagnostics:RequestCredentialSecretName"],
+            ["secretName"] = diagnosticSecretName,
             ["supportedLevels"] = new JsonArray(1, 2, 3, 4, 5)
         },
         ["secrets"] = new JsonObject
