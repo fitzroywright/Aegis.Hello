@@ -83,6 +83,7 @@ builder.Services.AddCommonRegistrationDiagnosticLevel(new RegistrationLifecycleO
         120)),
     RunbookReference: "docs/RUNBOOK.md"));
 builder.Services.AddAegisOperationsLogging(builder.Configuration, "Aegis.Hello", operationsLogInstanceId, operationsLogIdentityFile, builder.Environment.EnvironmentName);
+builder.Services.AddSingleton(new HelloRuntimeIdentity(runtimeSessionId));
 builder.Services.AddHostedService<HelloOperationsTelemetryPublisher>();
 
 var app = builder.Build();
@@ -594,9 +595,12 @@ app.Run();
 static string E(string? value) => HtmlEncoder.Default.Encode(value ?? "—");
 internal sealed record TimelineEvent(DateTimeOffset AtUtc, string Message, string? CorrelationId);
 
+internal sealed record HelloRuntimeIdentity(string RuntimeSessionId);
+
 internal sealed class HelloOperationsTelemetryPublisher(
     IConfiguration configuration,
     IHostEnvironment environment,
+    HelloRuntimeIdentity runtimeIdentity,
     ILogger<HelloOperationsTelemetryPublisher> logger) : BackgroundService
 {
     private const string ApplicationId = "Aegis.Hello";
@@ -667,6 +671,7 @@ internal sealed class HelloOperationsTelemetryPublisher(
                     request.Headers.TryAddWithoutValidation("X-Aegis-Application-Id", identity.ApplicationId);
                     request.Headers.TryAddWithoutValidation("X-Aegis-Instance-Id", identity.InstanceId);
                     request.Headers.TryAddWithoutValidation("X-Aegis-Installation-Id", identity.InstallationId);
+                    request.Headers.TryAddWithoutValidation("X-Aegis-Runtime-Session-Id", runtimeIdentity.RuntimeSessionId);
                     request.Headers.TryAddWithoutValidation("X-Aegis-Correlation-Id", Guid.NewGuid().ToString("N"));
 
                     using HttpResponseMessage response = await client.SendAsync(request, stoppingToken);
