@@ -128,7 +128,12 @@ async Task<JsonObject> BuildContractAsync(CancellationToken ct)
         .GetRequiredService<ICommonSecretsHealthCheck>()
         .CheckAsync(ct);
     string? diagnosticSecretName = builder.Configuration["Aegis:Diagnostics:RequestCredentialSecretName"]?.Trim();
-    bool remoteDiagnosticsConfigured = secretsHealth.IsAvailable && !string.IsNullOrWhiteSpace(diagnosticSecretName);
+    ISecretProvider secretProvider = app.Services.GetRequiredService<ISecretProvider>();
+    bool remoteDiagnosticsConfigured = await DiagnosticLevelCredentialState.IsAvailableAsync(
+        secretsHealth,
+        secretProvider,
+        diagnosticSecretName,
+        ct);
 
     return new JsonObject
     {
@@ -610,11 +615,41 @@ internal sealed record TimelineEvent(DateTimeOffset AtUtc, string Message, strin
 
 internal sealed record HelloRuntimeIdentity(string RuntimeSessionId);
 
+internal static class DiagnosticLevelCredentialState
+{
+    public static async Task<bool> IsAvailableAsync(
+        CommonSecretsHealth secretsHealth,
+        ISecretProvider secretProvider,
+        string? secretName,
+        CancellationToken cancellationToken)
+    {
+        if (!secretsHealth.IsAvailable || string.IsNullOrWhiteSpace(secretName))
+            return false;
+
+        try
+        {
+            string? credential = await secretProvider
+                .GetAsync(secretName, cancellationToken)
+                .ConfigureAwait(false);
+            return !string.IsNullOrWhiteSpace(credential);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+}
+
 internal sealed class HelloOperationsTelemetryPublisher(
     IConfiguration configuration,
     IHostEnvironment environment,
     HelloRuntimeIdentity runtimeIdentity,
     ICommonSecretsHealthCheck secretsHealthCheck,
+    ISecretProvider secretProvider,
     ILogger<HelloOperationsTelemetryPublisher> logger) : BackgroundService
 {
     private const string ApplicationId = "Aegis.Hello";
@@ -659,15 +694,20 @@ internal sealed class HelloOperationsTelemetryPublisher(
                     string? diagnosticSecretName =
                         configuration["Aegis:Diagnostics:RequestCredentialSecretName"]?.Trim();
                     bool remoteDiagnosticsConfigured =
-                        secretsHealth.IsAvailable &&
-                        !string.IsNullOrWhiteSpace(diagnosticSecretName);
+                        await DiagnosticLevelCredentialState.IsAvailableAsync(
+                            secretsHealth,
+                            secretProvider,
+                            diagnosticSecretName,
+                            stoppingToken);
                     string configurationStatus =
                         remoteDiagnosticsConfigured ? "Published" : "Attention";
                     string heartbeatReason = remoteDiagnosticsConfigured
                         ? "Hello process heartbeat is current, durable registration is valid, and remote DiagnosticLevel is configured."
                         : !secretsHealth.IsAvailable
                             ? "Remote DiagnosticLevel unavailable: Common.Secrets provider is not available."
-                            : "Remote DiagnosticLevel unavailable: Aegis:Diagnostics:RequestCredentialSecretName is not configured.";
+                            : string.IsNullOrWhiteSpace(diagnosticSecretName)
+                                ? "Remote DiagnosticLevel unavailable: Aegis:Diagnostics:RequestCredentialSecretName is not configured."
+                                : "Remote DiagnosticLevel unavailable: configured request credential cannot be resolved.";
 
                     using HttpClient client = new() { Timeout = TimeSpan.FromSeconds(telemetryTimeoutSeconds) };
                     using var request = new HttpRequestMessage(
