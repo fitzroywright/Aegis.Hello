@@ -201,6 +201,20 @@ async Task<JsonObject> BuildContractAsync(CancellationToken ct)
             },
             new JsonObject
             {
+                ["id"] = "diagnostic-level-request-credential",
+                ["displayName"] = "DiagnosticLevel Request Credential",
+                ["kind"] = "Secret",
+                ["required"] = true,
+                ["purpose"] = "Enables authenticated remote DiagnosticLevel execution and signed completion callbacks.",
+                ["configurationKey"] = "Aegis:Diagnostics:RequestCredentialSecretName",
+                ["secretName"] = diagnosticSecretName,
+                ["sensitive"] = true,
+                ["isConfigured"] = remoteDiagnosticsConfigured,
+                ["configurationState"] = remoteDiagnosticsConfigured ? "Configured" : "Missing",
+                ["verificationStatus"] = remoteDiagnosticsConfigured ? "Verified" : "Unavailable"
+            },
+            new JsonObject
+            {
                 ["id"] = "optional-label",
                 ["displayName"] = "Optional Label",
                 ["kind"] = "Configuration",
@@ -601,6 +615,7 @@ internal sealed class HelloOperationsTelemetryPublisher(
     IConfiguration configuration,
     IHostEnvironment environment,
     HelloRuntimeIdentity runtimeIdentity,
+    ICommonSecretsHealthCheck secretsHealthCheck,
     ILogger<HelloOperationsTelemetryPublisher> logger) : BackgroundService
 {
     private const string ApplicationId = "Aegis.Hello";
@@ -639,6 +654,22 @@ internal sealed class HelloOperationsTelemetryPublisher(
                         configuration.GetValue("Aegis:Operations:TelemetryTimeoutSeconds", 20),
                         5,
                         120);
+
+                    CommonSecretsHealth secretsHealth =
+                        await secretsHealthCheck.CheckAsync(stoppingToken);
+                    string? diagnosticSecretName =
+                        configuration["Aegis:Diagnostics:RequestCredentialSecretName"]?.Trim();
+                    bool remoteDiagnosticsConfigured =
+                        secretsHealth.IsAvailable &&
+                        !string.IsNullOrWhiteSpace(diagnosticSecretName);
+                    string configurationStatus =
+                        remoteDiagnosticsConfigured ? "Published" : "Attention";
+                    string heartbeatReason = remoteDiagnosticsConfigured
+                        ? "Hello process heartbeat is current, durable registration is valid, and remote DiagnosticLevel is configured."
+                        : !secretsHealth.IsAvailable
+                            ? "Remote DiagnosticLevel unavailable: Common.Secrets provider is not available."
+                            : "Remote DiagnosticLevel unavailable: Aegis:Diagnostics:RequestCredentialSecretName is not configured.";
+
                     using HttpClient client = new() { Timeout = TimeSpan.FromSeconds(telemetryTimeoutSeconds) };
                     using var request = new HttpRequestMessage(
                         HttpMethod.Post,
@@ -654,7 +685,7 @@ internal sealed class HelloOperationsTelemetryPublisher(
                             registrationStatus = "Registered",
                             state = "Healthy",
                             observedAtUtc = DateTimeOffset.UtcNow,
-                            configurationStatus = "Published",
+                            configurationStatus,
                             dependencies = new[]
                             {
                                 AegisControlPlaneEndpoints.ResolvePublic(
@@ -662,7 +693,7 @@ internal sealed class HelloOperationsTelemetryPublisher(
                                     AegisControlPlaneService.Configuration,
                                     configurationKey: "Aegis:Configuration:Url")
                             },
-                            reason = "Hello process heartbeat is current and its durable registration credential is valid."
+                            reason = heartbeatReason
                         })
                     };
 
