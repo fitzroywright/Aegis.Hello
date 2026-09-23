@@ -45,6 +45,7 @@ string operationsLogIdentityFile = builder.Configuration["Aegis:Registration:Ide
         : "/var/lib/aegis/hello/registration-identity.json");
 string levelXInstanceId = builder.Configuration["Aegis:Registration:InstanceId"]?.Trim()
     ?? builder.Environment.EnvironmentName;
+builder.Services.AddCommonDiagnostics();
 string levelXStorePath = builder.Configuration["Aegis:Diagnostics:StorePath"]?.Trim()
     ?? Path.Combine(builder.Environment.ContentRootPath, "data", "diagnostic-level", "hello.db");
 builder.Services.AddSingleton(new DiagnosticLevelExecutionOptions
