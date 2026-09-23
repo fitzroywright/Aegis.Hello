@@ -206,7 +206,6 @@ async Task<JsonObject> BuildContractAsync(CancellationToken ct)
                 ["kind"] = "Secret",
                 ["required"] = true,
                 ["purpose"] = "Enables authenticated remote DiagnosticLevel execution and signed completion callbacks.",
-                ["configurationKey"] = "Aegis:Diagnostics:RequestCredentialSecretName",
                 ["secretName"] = diagnosticSecretName,
                 ["sensitive"] = true,
                 ["isConfigured"] = remoteDiagnosticsConfigured,
