@@ -5,6 +5,7 @@ using System.Text.Json.Nodes;
 using Common.Diagnostics;
 using Common.Registration;
 using Common.Secrets;
+using Aegis.Hello;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -42,10 +43,50 @@ string operationsLogIdentityFile = builder.Configuration["Aegis:Registration:Ide
     ?? (OperatingSystem.IsWindows()
         ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "Aegis", "Hello", "registration-identity.json")
         : "/var/lib/aegis/hello/registration-identity.json");
+string diagnosticLevelInstanceId = builder.Configuration["Aegis:Registration:InstanceId"]?.Trim()
+    ?? builder.Environment.EnvironmentName;
+builder.Services.AddCommonDiagnostics();
+string diagnosticLevelStorePath = builder.Configuration["Aegis:Diagnostics:StorePath"]?.Trim()
+    ?? Path.Combine(builder.Environment.ContentRootPath, "data", "diagnostic-level", "hello.db");
+builder.Services.AddSingleton(new DiagnosticLevelExecutionOptions
+{
+    Application = "Aegis.Hello",
+    Component = "Web",
+    InstanceId = diagnosticLevelInstanceId,
+    CatalogVersion = "1"
+});
+builder.Services.AddSingleton(new DiagnosticLevelStoreOptions
+{
+    Path = diagnosticLevelStorePath
+});
+builder.Services.AddCommonSecretsDiagnostics();
+builder.Services.AddSingleton<IDiagnosticLevelLocalTest, HelloRequiredMessageDiagnosticLevelTest>();
+builder.Services.AddSingleton<IDiagnosticLevelLocalTest, HelloPublicUrlDiagnosticLevelTest>();
+builder.Services.AddSingleton<IDiagnosticLevelLocalTest, HelloControlPlaneEndpointsDiagnosticLevelTest>();
+builder.Services.AddSingleton<IDiagnosticLevelLocalTest, HelloRuntimeResourcesDiagnosticLevelTest>();
+builder.Services.AddSingleton<IDiagnosticLevelLocalTest, HelloVersionDiagnosticLevelTest>();
+builder.Services.AddSingleton<IDiagnosticLevelLocalTest, HelloControlPlaneDnsDiagnosticLevelTest>();
+builder.Services.AddSingleton<IDiagnosticLevelLocalTest, HelloSecretsHealthDiagnosticLevelTest>();
+builder.Services.AddSingleton<IDiagnosticLevelLocalTest, HelloDiagnosticStoreIntegrityDiagnosticLevelTest>();
+
+if (!Uri.TryCreate(configurationUrl.TrimEnd('/') + "/", UriKind.Absolute, out Uri? diagnosticLevelConfigurationUri))
+    throw new InvalidOperationException("Aegis Configuration URL is invalid.");
+
+builder.Services.AddCommonRegistrationDiagnosticLevel(new RegistrationLifecycleOptions(
+    diagnosticLevelConfigurationUri,
+    "Aegis.Hello",
+    diagnosticLevelInstanceId,
+    operationsLogIdentityFile,
+    TimeSpan.FromSeconds(Math.Clamp(
+        builder.Configuration.GetValue("Aegis:Registration:RequestTimeoutSeconds", 30),
+        5,
+        120)),
+    RunbookReference: "docs/RUNBOOK.md"));
 builder.Services.AddAegisOperationsLogging(builder.Configuration, "Aegis.Hello", operationsLogInstanceId, operationsLogIdentityFile, builder.Environment.EnvironmentName);
 builder.Services.AddHostedService<HelloOperationsTelemetryPublisher>();
 
 var app = builder.Build();
+app.MapDiagnosticLevelRuntime();
 
 const string applicationId = "Aegis.Hello";
 const string component = "Web";
@@ -85,6 +126,8 @@ async Task<JsonObject> BuildContractAsync(CancellationToken ct)
     CommonSecretsHealth secretsHealth = await app.Services
         .GetRequiredService<ICommonSecretsHealthCheck>()
         .CheckAsync(ct);
+    string? diagnosticSecretName = builder.Configuration["Aegis:Diagnostics:RequestCredentialSecretName"]?.Trim();
+    bool remoteDiagnosticsConfigured = secretsHealth.IsAvailable && !string.IsNullOrWhiteSpace(diagnosticSecretName);
 
     return new JsonObject
     {
@@ -116,9 +159,12 @@ async Task<JsonObject> BuildContractAsync(CancellationToken ct)
         {
             ["baseUrl"] = publicUrlConfigured ? publicUrl!.Trim() : null,
             ["healthPath"] = "/health",
-            ["supportsRemoteDiagnostics"] = false,
+            ["diagnosticsRunPath"] = "/api/engineering/diagnostics/diagnostic-level/run",
+            ["diagnosticsRunsPath"] = "/api/engineering/diagnostics/diagnostic-level/history",
+            ["supportsRemoteDiagnostics"] = remoteDiagnosticsConfigured,
             ["supportsOperationalTelemetry"] = true,
-            ["authenticationScheme"] = "AegisRegistration",
+            ["authenticationScheme"] = "DiagnosticLevel-HMAC-SHA256",
+            ["secretName"] = diagnosticSecretName,
             ["supportedLevels"] = new JsonArray(1, 2, 3, 4, 5)
         },
         ["secrets"] = new JsonObject
