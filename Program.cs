@@ -166,7 +166,7 @@ async Task<JsonObject> BuildContractAsync(CancellationToken ct)
             ["baseUrl"] = publicUrlConfigured ? publicUrl!.Trim() : null,
             ["healthPath"] = "/health",
             ["diagnosticsRunPath"] = "/api/engineering/diagnostics/diagnostic-level/run",
-            ["diagnosticsRunsPath"] = "/api/engineering/diagnostics/diagnostic-level/history",
+            ["diagnosticsRunsPath"] = "/api/engineering/diagnostics/diagnostic-level/runs",
             ["supportsRemoteDiagnostics"] = true,
             ["supportsOperationalTelemetry"] = true,
             ["authenticationScheme"] = "DiagnosticLevel-HMAC-SHA256",
