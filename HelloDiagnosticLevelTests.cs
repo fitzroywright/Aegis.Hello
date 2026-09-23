@@ -129,3 +129,98 @@ public sealed class HelloVersionDiagnosticLevelTest : IDiagnosticLevelLocalTest
                 : EngineeringDiagnosticPolicy.Passed(TestId, Name, "Component version is identifiable.", $"Version={version}"));
     }
 }
+
+
+public sealed class HelloControlPlaneDnsDiagnosticLevelTest(IConfiguration configuration) : IDiagnosticLevelLocalTest
+{
+    public string TestId => "AEGIS.HELLO.L3.NETWORK.CONTROL_PLANE_DNS";
+    public string Name => "Control Plane DNS resolution";
+    public string Owner => "Aegis.Hello";
+    public EngineeringDiagnosticLevel Level => EngineeringDiagnosticLevel.Level3Verification;
+    public bool IsDestructive => false;
+
+    public async Task<EngineeringDiagnosticCheckResult> RunAsync(CancellationToken cancellationToken)
+    {
+        string[] keys = ["Aegis:Configuration:Url", "Aegis:Diagnostics:Url", "Aegis:Operations:Url"];
+        List<string> failed = [];
+        List<string> evidence = [];
+        foreach (string key in keys)
+        {
+            string? value = configuration[key]?.Trim();
+            if (!Uri.TryCreate(value, UriKind.Absolute, out Uri? uri))
+            {
+                failed.Add(key);
+                continue;
+            }
+
+            if (uri.IsLoopback)
+            {
+                evidence.Add($"{key}=loopback");
+                continue;
+            }
+
+            try
+            {
+                System.Net.IPAddress[] addresses = await System.Net.Dns.GetHostAddressesAsync(uri.Host, cancellationToken).ConfigureAwait(false);
+                if (addresses.Length == 0) failed.Add(key);
+                else evidence.Add($"{key}={addresses.Length} address(es)");
+            }
+            catch (System.Net.Sockets.SocketException)
+            {
+                failed.Add(key);
+            }
+        }
+
+        return failed.Count == 0
+            ? EngineeringDiagnosticPolicy.Passed(TestId, Name, "All configured Control Plane hosts resolved.", string.Join("; ", evidence))
+            : EngineeringDiagnosticPolicy.Failed(TestId, Name, "One or more Control Plane hosts failed DNS resolution.", $"Failed={string.Join(",", failed)}");
+    }
+}
+
+public sealed class HelloSecretsHealthDiagnosticLevelTest(ICommonSecretsHealthCheck secretsHealth) : IDiagnosticLevelLocalTest
+{
+    public string TestId => "AEGIS.HELLO.L2.SECRETS.HEALTH";
+    public string Name => "Secrets provider health available";
+    public string Owner => "Aegis.Hello";
+    public EngineeringDiagnosticLevel Level => EngineeringDiagnosticLevel.Level2Repair;
+    public bool IsDestructive => false;
+
+    public async Task<EngineeringDiagnosticCheckResult> RunAsync(CancellationToken cancellationToken)
+    {
+        CommonSecretsHealth health = await secretsHealth.CheckAsync(cancellationToken).ConfigureAwait(false);
+        string evidence = $"Provider={health.ProviderName ?? "Unknown"}; Configured={health.IsConfigured}; Available={health.IsAvailable}";
+        if (!health.IsConfigured)
+            return EngineeringDiagnosticPolicy.Warning(TestId, Name, "Secrets provider is not configured.", evidence);
+        return health.IsAvailable
+            ? EngineeringDiagnosticPolicy.Passed(TestId, Name, "Secrets provider health is available.", evidence)
+            : EngineeringDiagnosticPolicy.Failed(TestId, Name, "Secrets provider is configured but unavailable.", evidence);
+    }
+}
+
+public sealed class HelloDiagnosticStoreIntegrityDiagnosticLevelTest(IDiagnosticLevelRunStore store) : IDiagnosticLevelLocalTest
+{
+    public string TestId => "AEGIS.HELLO.L1.DIAGNOSTICS.STORE_INTEGRITY";
+    public string Name => "Diagnostic history store internally consistent";
+    public string Owner => "Aegis.Hello";
+    public EngineeringDiagnosticLevel Level => EngineeringDiagnosticLevel.Level1CriticalIntervention;
+    public bool IsDestructive => false;
+
+    public async Task<EngineeringDiagnosticCheckResult> RunAsync(CancellationToken cancellationToken)
+    {
+        IReadOnlyList<DiagnosticLevelRunRecord> runs = await store
+            .QueryAsync(new DiagnosticLevelHistoryQuery(Take: 250), cancellationToken)
+            .ConfigureAwait(false);
+
+        int invalid = runs.Count(x =>
+            x.RunId == Guid.Empty ||
+            x.RequestId == Guid.Empty ||
+            x.CorrelationId == Guid.Empty ||
+            string.IsNullOrWhiteSpace(x.Application) ||
+            string.IsNullOrWhiteSpace(x.Component));
+
+        string evidence = $"RunsInspected={runs.Count}; Invalid={invalid}";
+        return invalid == 0
+            ? EngineeringDiagnosticPolicy.Passed(TestId, Name, "Diagnostic history store passed exhaustive structural validation.", evidence)
+            : EngineeringDiagnosticPolicy.Failed(TestId, Name, "Diagnostic history store contains structurally invalid runs.", evidence);
+    }
+}
