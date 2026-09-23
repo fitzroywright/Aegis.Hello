@@ -43,21 +43,21 @@ string operationsLogIdentityFile = builder.Configuration["Aegis:Registration:Ide
     ?? (OperatingSystem.IsWindows()
         ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "Aegis", "Hello", "registration-identity.json")
         : "/var/lib/aegis/hello/registration-identity.json");
-string levelXInstanceId = builder.Configuration["Aegis:Registration:InstanceId"]?.Trim()
+string diagnosticLevelInstanceId = builder.Configuration["Aegis:Registration:InstanceId"]?.Trim()
     ?? builder.Environment.EnvironmentName;
 builder.Services.AddCommonDiagnostics();
-string levelXStorePath = builder.Configuration["Aegis:Diagnostics:StorePath"]?.Trim()
+string diagnosticLevelStorePath = builder.Configuration["Aegis:Diagnostics:StorePath"]?.Trim()
     ?? Path.Combine(builder.Environment.ContentRootPath, "data", "diagnostic-level", "hello.db");
 builder.Services.AddSingleton(new DiagnosticLevelExecutionOptions
 {
     Application = "Aegis.Hello",
     Component = "Web",
-    InstanceId = levelXInstanceId,
+    InstanceId = diagnosticLevelInstanceId,
     CatalogVersion = "1"
 });
 builder.Services.AddSingleton(new DiagnosticLevelStoreOptions
 {
-    Path = levelXStorePath
+    Path = diagnosticLevelStorePath
 });
 builder.Services.AddCommonSecretsDiagnostics();
 builder.Services.AddSingleton<IDiagnosticLevelLocalTest, HelloRequiredMessageDiagnosticLevelTest>();
@@ -66,13 +66,13 @@ builder.Services.AddSingleton<IDiagnosticLevelLocalTest, HelloControlPlaneEndpoi
 builder.Services.AddSingleton<IDiagnosticLevelLocalTest, HelloRuntimeResourcesDiagnosticLevelTest>();
 builder.Services.AddSingleton<IDiagnosticLevelLocalTest, HelloVersionDiagnosticLevelTest>();
 
-if (!Uri.TryCreate(configurationUrl.TrimEnd('/') + "/", UriKind.Absolute, out Uri? levelXConfigurationUri))
+if (!Uri.TryCreate(configurationUrl.TrimEnd('/') + "/", UriKind.Absolute, out Uri? diagnosticLevelConfigurationUri))
     throw new InvalidOperationException("Aegis Configuration URL is invalid.");
 
 builder.Services.AddCommonRegistrationDiagnosticLevel(new RegistrationLifecycleOptions(
-    levelXConfigurationUri,
+    diagnosticLevelConfigurationUri,
     "Aegis.Hello",
-    levelXInstanceId,
+    diagnosticLevelInstanceId,
     operationsLogIdentityFile,
     TimeSpan.FromSeconds(Math.Clamp(
         builder.Configuration.GetValue("Aegis:Registration:RequestTimeoutSeconds", 30),
