@@ -167,7 +167,7 @@ async Task<JsonObject> BuildContractAsync(CancellationToken ct)
             ["healthPath"] = "/health",
             ["diagnosticsRunPath"] = "/api/engineering/diagnostics/diagnostic-level/run",
             ["diagnosticsRunsPath"] = "/api/engineering/diagnostics/diagnostic-level/history",
-            ["supportsRemoteDiagnostics"] = remoteDiagnosticsConfigured,
+            ["supportsRemoteDiagnostics"] = true,
             ["supportsOperationalTelemetry"] = true,
             ["authenticationScheme"] = "DiagnosticLevel-HMAC-SHA256",
             ["secretName"] = diagnosticSecretName,
@@ -255,7 +255,7 @@ async Task<JsonObject> BuildMetadataAsync(CancellationToken ct)
         ["framework"] = System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription,
         ["publicUrl"] = builder.Configuration["Aegis:PublicUrl"],
         ["secretsProvider"] = secretsHealth.ProviderName,
-        ["capabilities"] = new JsonArray("health", "registration-reference", "diagnostics-probe")
+        ["capabilities"] = new JsonArray("health", "registration-reference", "diagnostics-probe", "diagnostic-level-remote")
     };
 }
 
