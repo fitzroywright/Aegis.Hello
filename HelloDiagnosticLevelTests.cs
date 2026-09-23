@@ -1,4 +1,5 @@
 using Common.Diagnostics;
+using Common.Secrets;
 
 namespace Aegis.Hello;
 
