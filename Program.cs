@@ -65,6 +65,9 @@ builder.Services.AddSingleton<IDiagnosticLevelLocalTest, HelloPublicUrlDiagnosti
 builder.Services.AddSingleton<IDiagnosticLevelLocalTest, HelloControlPlaneEndpointsDiagnosticLevelTest>();
 builder.Services.AddSingleton<IDiagnosticLevelLocalTest, HelloRuntimeResourcesDiagnosticLevelTest>();
 builder.Services.AddSingleton<IDiagnosticLevelLocalTest, HelloVersionDiagnosticLevelTest>();
+builder.Services.AddSingleton<IDiagnosticLevelLocalTest, HelloControlPlaneDnsDiagnosticLevelTest>();
+builder.Services.AddSingleton<IDiagnosticLevelLocalTest, HelloSecretsHealthDiagnosticLevelTest>();
+builder.Services.AddSingleton<IDiagnosticLevelLocalTest, HelloDiagnosticStoreIntegrityDiagnosticLevelTest>();
 
 if (!Uri.TryCreate(configurationUrl.TrimEnd('/') + "/", UriKind.Absolute, out Uri? diagnosticLevelConfigurationUri))
     throw new InvalidOperationException("Aegis Configuration URL is invalid.");
