@@ -60,14 +60,14 @@ builder.Services.AddSingleton(new DiagnosticLevelStoreOptions
     Path = diagnosticLevelStorePath
 });
 builder.Services.AddCommonSecretsDiagnostics();
-builder.Services.AddSingleton<IDiagnosticLevelLocalTest, HelloRequiredMessageDiagnosticLevelTest>();
-builder.Services.AddSingleton<IDiagnosticLevelLocalTest, HelloPublicUrlDiagnosticLevelTest>();
-builder.Services.AddSingleton<IDiagnosticLevelLocalTest, HelloControlPlaneEndpointsDiagnosticLevelTest>();
-builder.Services.AddSingleton<IDiagnosticLevelLocalTest, HelloRuntimeResourcesDiagnosticLevelTest>();
-builder.Services.AddSingleton<IDiagnosticLevelLocalTest, HelloVersionDiagnosticLevelTest>();
-builder.Services.AddSingleton<IDiagnosticLevelLocalTest, HelloControlPlaneDnsDiagnosticLevelTest>();
-builder.Services.AddSingleton<IDiagnosticLevelLocalTest, HelloSecretsHealthDiagnosticLevelTest>();
-builder.Services.AddSingleton<IDiagnosticLevelLocalTest, HelloDiagnosticStoreIntegrityDiagnosticLevelTest>();
+builder.Services.AddDiagnosticLevelTest<HelloRequiredMessageDiagnosticLevelTest>();
+builder.Services.AddDiagnosticLevelTest<HelloPublicUrlDiagnosticLevelTest>();
+builder.Services.AddDiagnosticLevelTest<HelloControlPlaneEndpointsDiagnosticLevelTest>();
+builder.Services.AddDiagnosticLevelTest<HelloRuntimeResourcesDiagnosticLevelTest>();
+builder.Services.AddDiagnosticLevelTest<HelloVersionDiagnosticLevelTest>();
+builder.Services.AddDiagnosticLevelTest<HelloControlPlaneDnsDiagnosticLevelTest>();
+builder.Services.AddDiagnosticLevelTest<HelloSecretsHealthDiagnosticLevelTest>();
+builder.Services.AddDiagnosticLevelTest<HelloDiagnosticStoreIntegrityDiagnosticLevelTest>();
 
 if (!Uri.TryCreate(configurationUrl.TrimEnd('/') + "/", UriKind.Absolute, out Uri? diagnosticLevelConfigurationUri))
     throw new InvalidOperationException("Aegis Configuration URL is invalid.");
